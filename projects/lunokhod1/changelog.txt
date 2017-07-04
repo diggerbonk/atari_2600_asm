@@ -1,0 +1,59 @@
+BUILD-7 July 10, 2017
+
+    1) Removed smart bomb feature
+    2) Added a single channel audio loop player for background music
+    3) Tweaked some more ramp-up features, still a WIP.
+    4) Various optimizations to squeeze the above things in, also a WIP
+
+BUILD-6 Apri 2, 2012
+
+    1) Refactor radar so that only one item is rendered per line. This will 
+       allow assigning colors for each item. 
+    2) Removed hills at top of screen, which allows more room for falling 
+       debris and opens up some other gameplay options. Also freed up som 
+       ram and rom space. 
+    3) Added smart bombs.
+    4) Game "Levels" run at various speeds based on current score. 
+    5) Tweaked some sounds. 
+    6) Radioactive elements are given a different color on the radar.
+
+
+BUILD-5 March 12, 2012
+
+    1) Fixed an out of bounds index in create_missile
+    2) Got rid of bounds checking in create_debris, no longer necssary 
+       or desirable now that the game wraps.
+    3) Moved the horizontal fine adjust table onto a page boundary so the
+       end label position gets calculated correctly.
+    4) Eliminated the animation counter
+    5) Added debris move tables to get granular control over debris speed.   
+    6) Objects can scroll partially off screen
+    7) Added waves with gradually increasing difficulty
+           * Each wave gets longer
+           * Speed increases over time
+           * The ratio of radioactive to absorbing debris increases over time
+
+BUILD-4 March 9, 2012
+
+    1) Optimized the playfield scrolling a bit.
+    2) Falling debris now disappears behind the hills instead 
+       of on top of them.
+
+BUILD-3 March 6, 2012
+
+    1) Fixed score display glitch
+    2) The game now wraps around intead of having boundaries on the left
+       and right edges. 
+
+BUILD-2 March 5, 2012
+
+    1) Added visual cue when radioactive debris hits the ground.
+    2) Radioactive debris blinks in the radar.
+    3) Start the game with the joystick trigger
+    4) Improve game soundtrack
+    5) Tweaked sound volumes
+    6) Radioactivity gauge is more prominent
+
+BUILD-1 March 2, 2012
+
+    1) Initial public release of Lunokhod
