@@ -19,25 +19,34 @@
     SEG
     ORG $F000 ; set the ROM page
 
-; constants
+; constantsf
 
 MODE_ATTRACT            equ #0      ; game modes
 MODE_TRANSITION         equ #1      ; 1-127
-MODE_TRANSITION_TOP     equ #127    ;
-MODE_IN_PROGRESS        equ #128    ;
-MODE_END_WAVE           equ #129    ; 129-253
-MODE_END_WAVE_TOP       equ #253    ;
-MODE_GAME_OVER          equ #254    ;
+MODE_TRANSITION_TOP     equ #249    ;
+MODE_IN_PROGRESS        equ #250    ;
+MODE_END_WAVE           equ #251    ; 129-253
+MODE_END_WAVE_TOP       equ #252    ;
+MODE_GAME_OVER          equ #253    ;
+MODE_RESET_DOWN         equ #254
 MODE_RESET              equ #255    ;
+
 MISSILE_FOLLOWS_SHIP    equ #0      ;
-MAXSPEED                equ #2      ; the max speed of the sled
-MINSPEED                equ #-2     ; the min speed of the sled
-MINXPOS                 equ #61-1   ; minimum screen positionof the sled (32)
-MAXXPOS                 equ #91+1   ; maximum screen position of the sled  (112)
+NEW_MOVE_DEBRIS         equ #0
+MAXSPEED                equ #2    ; the max speed of the sled
+MINSPEED                equ #-2    ; the min speed of the sled
+MINXPOS                 equ #61-20  ; minimum screen positionof the sled (32)
+MAXXPOS                 equ #91+20  ; maximum screen position of the sled  (112)
 POSDELTA                equ #MAXXPOS-MINXPOS        ; this must be equal to maxpos-minpos (80)
 P0CENTER                equ #4      ; offset to center of player 0
-MISSILESPEED            equ #5
-MISSILESIZE             equ #9
+MISSILESPEED            equ #7
+MISSILESIZE             equ #8
+MISSILECOLOR            equ #$ae
+;MINXSCREEN              equ #8
+;MAXXSCREEN              equ #154
+MINXSCREEN              equ #1
+MAXXSCREEN              equ #160
+MAXXSCREEN              equ #160
 GAUGECOLOR              equ #$32
 SCORECOLOR              equ #$0e
 SCOREBGCOLOR            equ #$00
@@ -48,7 +57,7 @@ GRADIENT1               equ #$04
 GRADIENT2               equ #$04
 GRADIENT3               equ #$02
 RADARCOLOR              equ #$14
-RADARCOLOR2             equ #$48
+RADARCOLOR2             equ #$C8
 GROUNDCOLOR             equ #$00
 SNOWCOLOR               equ #$06
 RAILCOLOR               equ #$02
@@ -57,10 +66,11 @@ PLAYFIELDSZ             equ #140
 ENEMYHEIGHT             equ #17
 SHOT_TIMING             equ #6
 SPRITEINIT              equ #PLAYFIELDSZ+ENEMYHEIGHT+1
-ME_VOL0                 equ #1      ; music engine volume event
-ME_PITCH0               equ #2      ; music engine pitch event
-ME_TONE0                equ #3      ; music engine tone event
-ME_END                  equ #5      ; music engine end event
+ME_VOL0                 equ #0      ; music engine volume event
+ME_PITCH0               equ #255      ; music engine pitch event
+ME_TONE0                equ #1      ; music engine tone event
+ME_END                  equ #2      ; music engine end event
+SONGTONE                equ #6
 
 ; variable assignments.
 
@@ -72,12 +82,10 @@ temp1lo         equ  $85    ; temporary 16 bit var
 temp1hi         equ  $86    ; temporary 16 bit var
 temp2lo         equ  $87    ; temporary 16 bit var
 temp2hi         equ  $88    ; temporary 16 bit var
-temp3           equ  $89    ; temporary 8 bit var
-radarColor      equ  $8a    ; Each bit represents whether or the
-                            ; corresponding debris is radioactive, info
-                            ; used to color the item differently
-songPtrLo       equ  $8b    ; points to the current song position
-songPtrHi       equ  $8c    ;
+randomSeed      equ  $89    ;
+direction       equ  $8a    ;
+songPos         equ  $8b    ; points to the current song position
+UNUSED           equ  $8c    ;
 waveCounter     equ  $8d    ; number of debris created in the current wave
 nexty           equ  $8e    ;
 m0vxlo          equ  $8f    ; virtual x position of missile 0
@@ -107,10 +115,13 @@ wave            equ  $bc    ; 0-31, incremented by one. The first five
 p1colorlo       equ  $bd    ;
 p1colorhi       equ  $be    ;
 spritecount     equ  $bf    ;
-spriteramidx    equ  $c0    ; C0-C7
+spriteramidx    equ  $c0    ; C0-C7 pointers into spriteram
+
 spriteram       equ  $c8    ; C8-D7 16 bytes of ram organized in 2 byte
                             ; chunks, each chunk containing display
-                            ; data for a given debris sprite.
+                            ; data for a given debris sprite. this is
+                            ; loaded with the current animation frames
+
 effectState    equ  $D8     ; holds state information for current
                             ; audio/video effect: XXXYYYYY, where XXX
                             ; is the event type and YYYYY is the event
@@ -121,6 +132,7 @@ radlevel        equ  $DB    ;
 musicEngineCount equ  $DC   ;
 vxoffsetlo      equ  $DD    ;
 radarRam        equ  $DE    ; DE-FD 16 bytes to store radar display data
+temp3           equ  $FE
 
 ; sysinit
 ;
@@ -138,8 +150,6 @@ sysinit_clear
     pha
     bne sysinit_clear
     jsr non_system_init
-    lda #MODE_ATTRACT
-    sta gameMode
     jmp main_loop
 sysinit_end
 
@@ -175,6 +185,12 @@ clear_loop                          ;
     lda #77                         ;
     sta p0vxlo                      ;
 
+    lda #$FF
+    sta songPos
+
+    lda #MODE_ATTRACT
+    sta gameMode
+
     rts
 non_system_init_end
 
@@ -201,7 +217,7 @@ vblank_start:
     lda #0                          ; ""
     sta  WSYNC                      ; ""
     sta  VSYNC                      ; turn off vsync
-    lda  #48                        ; Set the timer for 2812 cycles
+    lda  #45                        ; Set the timer for 2812 cycles
     sta  TIM64T                     ; ""
 vblank_start_end
 
@@ -219,11 +235,11 @@ process_gameMode:
     cmp #MODE_GAME_OVER             ;
     beq do_game_over                ;
     cmp #MODE_END_WAVE              ;
-    bcs do_end_wave                 ;
+    beq do_end_wave                 ;
     cmp #MODE_IN_PROGRESS           ;
     beq process_gameMode_end        ;
     cmp #MODE_TRANSITION            ;
-    bcs do_start_wave               ;
+    beq do_start_wave               ;
     jmp process_gameMode_end        ;
 
 do_reset
@@ -231,42 +247,32 @@ do_reset
     jsr non_system_init
     lda #MODE_TRANSITION
     sta gameMode
-    lda #<song_loop_intro
-    sta songPtrLo
-    lda #>song_loop_intro
-    sta songPtrHi
     lda #1
     sta musicEngineCount
     lda #0
     sta score
     sta score+1
+    sta songPos
     jmp process_gameMode_end
 
 do_game_over
 
+    jsr non_system_init
     lda #MODE_ATTRACT
     sta gameMode
-    lda #0
-    sta songPtrLo
-    sta p0s
+    lda #$FF
+    sta songPos
+    lda #1
+    sta musicEngineCount
+    jmp process_gameMode_end
 
 do_end_wave
-
-   inc gameMode
-   lda gameMode
-   cmp #MODE_END_WAVE_TOP
-   bne process_gameMode_end
 
    lda #MODE_TRANSITION
    sta gameMode
    jmp process_gameMode_end
 
 do_start_wave
-
-   inc gameMode
-   lda gameMode
-   cmp #MODE_TRANSITION_TOP
-   bne process_gameMode_end
 
    lda #MODE_IN_PROGRESS
    sta gameMode
@@ -368,25 +374,11 @@ noRandomAudc
 
 do_audio_end
 
-
-; music_engine
-;
-; process one-channel audio loops. events are in a 3 byte format:
-;
-;   first byte  :
-;     bits 0-6  : event type
-;   second byte : value
-;   third byte  : duration
-;
-; event types:
-;   set volume : set volume for a channel
-;   set pitch  : set pitch for a channel
-;   set tone   : set the tone for a channel
-;   end        : end of loop, go back to start
-
-    echo "------", [*], [* - $F000]d, "music_engine"
-
 music_engine:
+
+    ldy songPos
+    cmp #$FF
+    beq music_engine_end
 
     dec musicEngineCount    ; 5     ; decriment the counter, if it is 0 load the next event
     beq music_next_event    ; 2-4   ; ""
@@ -394,72 +386,65 @@ music_engine:
 
 music_next_event            ;       ; load the next event
 
-    ldy #0                  ; 2     ; start y at 0
-    lda (songPtrLo),y       ; 5,    ; load the event type and store it in x
-    tax                     ; 2
+    lda songLoopIntro,y             ; load the pitch, if it is 255 this
+    cmp #255                        ; is a jump
+    beq music_engine_jump           ;
+    sta AUDF0                       ;
 
-    iny                     ; 2     ; load second event parameter
-    lda (songPtrLo),y       ; 5     ;
+    iny
+    lda songLoopIntro,y           ; load the tone
+    sta AUDC0
 
-    cpx #ME_VOL0            ; 2     ; call the right event handler
-    beq music_volume        ; 2-4   ; ""
-    cpx #ME_PITCH0          ; 2     ; ""
-    beq music_pitch         ; 2-4   ; ""
-    cpx #ME_TONE0           ; 2     ; ""
-    beq music_distortion    ; 2-4   ; ""
-    cpx #ME_END             ; 2     ; ""
-    beq music_end_event     ; 2-4   ; ""
-do_audio_leap
-    jmp music_engine_end    ; 3     ; unknown event! skip it
-music_pitch
-;    clc
-;    sbc wave
-;    adc #1
-    sta AUDF0               ; 4
-    jmp music_event_time    ; 3
-music_volume
-    sta AUDV0               ; 4
-    jmp music_event_time    ; 3
-music_distortion
-    sta AUDC0               ; 4
-    jmp music_event_time    ; 3
-music_end_event
-    bne music_stop          ; 3-4
-    tax                     ; 2
-    iny                     ; 2
-    lda (songPtrLo),y       ; 5
-    sta songPtrHi           ; 3
-    stx songPtrLo           ; 3
-    jmp music_next_event    ; 3
+    iny
+    lda songLoopIntro,y            ; load the volume
+    sta AUDV0
 
-music_stop
-    lda #0                  ; 2
-    sta songPtrHi           ; 3
-    jmp music_engine_end    ; 3
+    iny
+    lda songLoopIntro,y           ; load the duration
 
-music_event_time
-    iny                     ; 2
-    lda (songPtrLo),y       ; 5
-    sta musicEngineCount    ; 3
-    tay                     ; 2
-    jmp music_increment1    ; 3
 
-music_increment
-    ldy #0                  ; 2
-music_increment1
-    clc                     ; 2
-    lda songPtrLo           ; 3
-    adc #3                  ; 2
-    sta songPtrLo           ; 3
-    lda songPtrHi           ; 3
-    adc #0                  ; 2
-    sta songPtrHi           ; 3
+;; MULTIPLY
+    ; adjust for tempo. multiply by delta then divide by 8.
 
-    cpy #0                  ; 2
-    bne music_engine_end    ; 3-4
-    jmp music_next_event    ; 3
+    sta musicEngineCount
+    cmp #1
+    beq endMusicEngineDivide;
+
+    ldx wave
+    lda tempoTable,x
+    sta temp3
+    lda #0
+    beq enterMultiplyLoop
+doAdd
+    clc
+    adc temp3
+theLoop
+    asl temp3
+enterMultiplyLoop
+    lsr musicEngineCount
+    bcs doAdd
+    bne theLoop
+end
+    lsr
+    lsr
+    lsr
+    sta musicEngineCount
+
+endMusicEngineDivide
+;
+    iny
+    sty songPos
+    jmp music_engine_end
+
+music_engine_jump
+
+    iny
+    lda songLoopIntro,y
+    tay
+    jmp music_next_event
 
 music_engine_end
+
 
 ; adjust_missiles
 ;
@@ -639,6 +624,7 @@ swap_missiles1_end
     nop                 ; waste time before the HMCLR
     sta HMCLR
 
+
 ; remove_stale_debris
 ;
 ; Check the bottom debris moved and see if it needs to be removed,
@@ -649,42 +635,40 @@ swap_missiles1_end
 
 remove_stale_debris
 
-    ldx debrisCount                ; load the debris count into x
-    cpx #0                         ; compare x to 0
-    beq remove_stale_debris_end    ; if it = 0 then skip remove debris
-    dex                            ; else decriment x so that it equals
-                                   ; the lowest debris index
+    ldx debrisCount                 ; load the debris count into x
+    cpx #0                          ; compare x to 0
+    beq remove_stale_debris_end     ; if it = 0 then skip remove debris
 
-    lda debrisy,x                  ; load the debris x position into a
-    cmp #4                         ; compare a to 4
-    bcs remove_stale_debris_end    ; if a >= 4 then skip remove debris
-    dec debrisCount                ; else decriment debrisCount
+    dex                             ; decriment x so that it equals
+                                    ; the lowest debris index
+
+    lda debrisy,x                   ; load the debris y position into a
+    cmp #4                          ; compare a to 4
+    bcs remove_stale_debris_end     ; if a >= 4 then skip remove debris
+    dec debrisCount                 ; else decriment debrisCount
 
 
-    lda debrisinfo,x               ; check if this is uncondemned
-    and #%00011111                 ; radioactive  debris (011, 111).
-    cmp #%00011000
-    bne check_for_absorber         ; for an absorber
-                                   ;
+    lda debrisinfo,x                ; if the debris is radioactive and
+    and #%00011111                  ; it is not condemned (011, 111) we
+    cmp #%00011000                  ; trigger an effect and update the
+    bne check_for_absorber          ; radLevel (else skip to absorber
+                                    ; check
 
-    lda #%10010111                 ; play radioactiveaudio
-    sta effectState               ;
+    lda #%10010111                  ; play radioactiveaudio
+    sta effectState                 ;
 
-    lda radlevel                   ; update radlevel
-    lsr                            ;
-    clc                            ;
-    adc #128                       ;
-    sta radlevel                   ;
+    lda radlevel                    ; update radlevel
+    lsr                             ;
+    clc                             ;
+    adc #128                        ;
+    sta radlevel                    ;
 
-    cmp #$FF                       ; compare radlevel to FF
-    bne remove_stale_debris_end    ; if not FF, then game continues
-                                   ; else the game is over
-
-    lda #MODE_GAME_OVER             ; set game gameMode to MODE_GAME_OVER
-    sta gameMode                       ;
-
-    lda #0                         ; set debrisCount to 0
-    sta debrisCount                ;
+    cmp #$FF                        ; if radLevel has reached maximum
+    bne remove_stale_debris_end     ; then the game is over, set
+    lda #MODE_GAME_OVER             ; gameMode to MODE_GAME_OVER and the
+    sta gameMode                    ; debrisCount to 0
+    lda #0                          ;
+    sta debrisCount                 ;
 
     jmp remove_stale_debris_end
 
@@ -725,17 +709,10 @@ no_move_debris_end
 
     lda #0
     sta spritecount
-
     ldx #0                          ; set loop index to 0
 
 move_debris_loop
 
-    ; get the moveTable index and store it in y
-    lda debrisinfo,x    ; 4
-    lsr                 ; 2
-    lsr                 ; 2
-    lsr                 ; 2
-    tay                 ; 2
 
 ; begin_horizontal_move
 ;
@@ -744,23 +721,21 @@ move_debris_loop
 
 begin_horizontal_move
 
-    lda frameCount             ; skip horizontal movent is a function
-    and #%00000011             ; of or'ing the frame count with 10,
-    ora #%00000010             ; and and'ing it with the current wave.
-    and wave
-    beq end_horizontal_move
+#if NEW_MOVE_DEBRIS = 1
+    txa
+    asl
+    asl
+    adc frameCount
+    lsr
+    lsr
+    and #%00000111
 
-    ; if the left move flag is set in moveTable for, move left
-    lda moveTable,y
-    and #%00100000
-    bne move_debris_left
+    tay
 
-    ; if the right move flag is set in moveTable for, move right
-    lda moveTable,y
-    and #%01000000
-    bne move_debris_right
-
-    ; not left or right, skip horizontal movement
+    lda debrisvx,x
+    clc
+    adc sineTable,y
+    sta debrisvx,x
     jmp end_horizontal_move
 
 move_debris_left
@@ -782,66 +757,25 @@ move_debris_right
     adc #%00000001
     adc debrisvx,x
     sta debrisvx,x
+    jmp end_horizontal_move
 
+#endif
 end_horizontal_move
 
 ; begin_vertical_move
 ;
-; move debris downwards, according to current speed setting. Speed is
-; impacted by two parameters: which frames are used to calulate moves
-; and the speed adder.
-; Frame mask:
-;      00000000 : adjust position every frame
-;      00000001 : adjust position every other frame
-;      00000011 : adjust position every 4th fram
-; Adder:
-;      00000001 : adjust position by 1
-;      00000010 : adjust position by 2 (only valid for "every frame")
-;
-; Note that this scheme provides for 4 possile vertical speeds.
+
 
 begin_vertial_move
 
-    lda wave
-    lsr
-    lsr
-    and #%00000011
-    cmp #0
-    bne allFrames
-
     lda frameCount
-    and #%00000001
-    cmp #%00000000
+    and #%00000000
     bne end_vertical_move
-    jmp increment1Vertical
-
-allFrames
-    cmp #1
-    beq increment1Vertical
-    cmp #2
-    beq increment2Vertical
 
     lda debrisy,x       ; "" ; load current debrix x position
     sec                 ; "" ; set the carry flag (needed?)
-    sbc #%00000011      ;    ; subtract 3
+    sbc #%00000001      ;    ; subtract 1
     sta debrisy,x       ; "" ; update current debris x position
-    jmp end_vertical_move
-
-
-increment1Vertical
-
-    lda debrisy,x       ; "" ; load current debrix x position
-    sec                 ; "" ; set the carry flag (needed?)
-    sbc #%00000001      ;    ; subtract 2
-    sta debrisy,x       ; "" ; update current debris x position
-    jmp end_vertical_move
-
-increment2Vertical
-
-    lda debrisy,x       ; ""        ; load current debrix x position
-    sec                 ; ""        ; set the carry flag (needed?)
-    sbc #%00000010      ;           ; subtract 2
-    sta debrisy,x       ; ""        ; update current debris x position
 
 end_vertical_move
 
@@ -866,6 +800,7 @@ set_to_ff
     stx temp3                       ; store x, our debris index, so we
                                     ; can use x to look up details
                                     ; in the sprite table
+
 
     lda debrisinfo,x                ; increment the condemned counter
     and #%00000111                  ; if the counter is non-zero.
@@ -897,29 +832,20 @@ spriteselect
 
 spritemove
 
+    ldx spritecount
     lda frameCount      ; 3         ; use framecount to choose which
-    and #%00011100      ; 2         ; sprite animation frame to show.
+    and #%00001100      ; 2         ; sprite animation frame to show.
     lsr                 ; 2         ; we use the memory location grabbed
     tay                             ; spritetable in "spriteselect"
-    lda (temp2lo),y                 ; above to look up the sprite data.
-    sta temp1lo                     ;
+    lda (temp2lo),y                 ; above to look up the sprite frame
+    sta spriteram,x                 ; data.
     iny                             ;
     lda (temp2lo),y                 ;
-    sta temp1hi                     ;
-
-    ldx temp3                       ; restore previously saved x
-    txa                             ;
-
-    ldx spritecount                 ; add this debris to the list of
-    sta spriteramidx,x              ; sprites that will be drawn in
-    lda temp1lo                     ; draw playfield
-    sta spriteram,x                 ;
-    lda temp1hi                     ;
-    sta spriteram+8,x               ;
+    sta spriteram+8,x                     ;
 
     inc spritecount                 ; tee up the next sprite
 
-    ldx temp3                       ; store x in temp3
+    ldx temp3                       ; reload x
 
 move_debris_skip
 
@@ -1047,10 +973,9 @@ waitOnVblank
     lda INTIM           ; wait for timeout to expire
     bne waitOnVblank
 
-    lda #0              ; turn off the vblank
-    sta VBLANK          ; ""
     sta WSYNC           ; wait for the next line.
     sta HMOVE           ; this HMOVE is paired with the init_ball routine above
+    sta VBLANK          ; ""
 
 vblank_end_end
 
@@ -1064,16 +989,24 @@ draw_score:
 
     lda #SCOREBGCOLOR   ; 2, 4
     sta COLUBK          ; 3, 7
+    lda #SCORECOLOR
+;    ldy gameMode
+;    cpy #MODE_IN_PROGRESS
+;    bne skipScoreBlink
+;    lda frameCount
+;    and #%00001111
+;    ora #%00000011
+skipScoreBlink
     sta WSYNC           ; 3, -
-    lda #1              ; 2, 2
-    sta HMCLR           ; 3, 5
-    sta NUSIZ0          ; 3, 8
-    sta NUSIZ1          ; 3, 11
-    lda #SCORECOLOR     ; 2, 13
-    sta COLUP0          ; 3, 16
-    sta COLUP1          ; 3, 19
-    SLEEP 20            ; 20, 39
-    sta RESP0           ; 3, 42
+    sta COLUP0          ; 3, 3
+    sta COLUP1          ; 3, 6
+    lda #1              ; 2, 8
+    sta HMCLR           ; 3, 11     ; clear the motion register
+    sta NUSIZ0          ; 3, 14     ; two copies of each player
+    sta NUSIZ1          ; 3, 17     ;
+    nop                 ; 2, 19
+    SLEEP 20            ; 20, 39    ; waste cycles here.
+    sta RESP0           ; 3, 42     ; start drawing
     sta RESP1           ; 3, 45
     lda #%11110000      ; 2, 47
     sta HMP0            ; 3, 50
@@ -1104,6 +1037,25 @@ score_loop              ; +1, 5
     sta GRP0            ; 3, 12
     lda  #%00010000     ; 2, 14
 
+    lda #MISSILECOLOR   ; 2, 16
+    sta COLUP0          ; 2, 18
+    sta COLUP1          ; 2, 20
+
+; init_player_position
+;
+; Initialize the player horizontal position, for use later in the
+; kernel.
+
+    echo "------", [*], [* - $F000]d, "init_player_position"
+
+init_player_position
+
+    lda p0x             ; 2, 22
+    ldx #0              ; 2, 24
+    jsr do_sprite_move  ; -,
+
+init_player_position_end
+
 ; init_playfield
 ;
 ; Between drawing the score but before the playfield, initialize our
@@ -1117,29 +1069,33 @@ score_loop              ; +1, 5
 init_playfied:
 
     sta WSYNC
+    sta HMCLR                   ; so HMOVES do not effect sled position
     lda #7              ; 2, 22 ;
     sta TIM64T          ; 3, 25 ;
 
-; load the list of currently visible debris sprites
-; into spriteList.
+; load_visible_sprites
+;
+; walk through full list of debris, add any that are on-screen to our
+; spriteram index for use in draw_playfield
+;
 ; TIME: 184 (max)
 
 load_visible_sprites
 
-    ldx #$FF            ; 2, 7       ; index
-    ldy #0              ; 2, 9       ; for spritecount
+    ldx #$FF            ; 2, 7      ;
+    ldy #0              ; 2, 9      ; for spritecount
     jmp lvs_skip        ; 3
-lvs_loop                ; max loop time (when debriscount = 8) is 175 cycles
+lvs_loop                            ; max loop time (when debriscount = 8) is 175 cycles
     lda debrisx,x       ; 4         ; if the x position is FF (off screen), then skip
     cmp #$FF            ; 2
     beq lvs_skip        ; 2/3
-    stx spriteramidx,y ; 4
+    stx spriteramidx,y  ; 4
     iny                 ; 2
 lvs_skip                ; + 1
     inx                 ; 2
     cpx debrisCount     ; 3
-    bne lvs_loop        ; 3            ; LOOP TIME = 22 * 8 - 1 = 175
-    sty spritecount     ; 3,  184      ; set spritecount
+    bne lvs_loop        ; 3         ; LOOP TIME = 22 * 8 - 1 = 175
+    sty spritecount     ; 3,  184   ; set spritecount
 
 load_visible_sprites_end
 
@@ -1147,6 +1103,7 @@ load_visible_sprites_end
 ; in the kernel.
 
 preload_sprite
+
     lda #$EF            ; 2, 2  ; Yes, this is $EF
     sta nexty           ; 3, 5
     lda spritecount     ; 3, 8
@@ -1166,12 +1123,13 @@ preload_sprite
     sta p1colorhi       ; 3, 48 ;
 
     ldy #0              ; 2, 50
-    ldx spriteramidx,y    ; 4, 54
+    ldx spriteramidx,y  ; 4, 54
     lda debrisy,x       ; 4, 58
     sta nexty           ; 3, 61
     lda debrisx,x       ; 4, 65
     ldx #1              ; 2, 67
     jsr do_sprite_move  ; ~91, 158
+
 preload_sprite_end
 
     echo "------", [*], [* - $F000]d, "sky_wait"
@@ -1194,6 +1152,7 @@ init_playfield_end
 ; We draw the top line, and have a few additional cycles to set the
 ; playfield background color (and related visual effects). This MUST
 ; fit in a single scanline.
+; MAX CYCLES: 46
 
     echo "------", [*], [* - $F000]d, "draw_top_line"
 
@@ -1202,23 +1161,23 @@ draw_top_line
     lda #$0c               ; 2, 2   ; line color between score and sky
     sta COLUBK             ; 3, 5   ;
 
-    lda effectState
-    cmp #%10000000          ; 2, 7   ; corresponding action
-    bcs radioactiveEffect    ; 2, 8   ;
-    cmp #%01000000               ; 2, 11  ;
-    bcs absorberEffect       ; 2, 13  ;
-    jmp resetBackground       ; 3, 18  ;
+    lda effectState        ; 3, 8
+    cmp #%10000000         ; 2, 10   ; corresponding action
+    bcs radioactiveEffect  ; 2, 12  ;
+    cmp #%01000000         ; 2, 14  ;
+    bcs absorberEffect     ; 2, 16  ;
+    jmp resetBackground    ; 3, 19  ;
 
-radioactiveEffect            ; 1, 9
-    lda #$20               ; 2, 11
-    jmp doneSetEffectColor ; 3, 14
+radioactiveEffect          ; 1, 13
+    lda #$20               ; 2, 15
+    jmp doneSetEffectColor ; 3, 18
 
-absorberEffect               ; 1, 14
-    lda #$80               ; 2, 16
+absorberEffect             ; 1, 17
+    lda #$80               ; 2, 19
 
-doneSetEffectColor         ; 1, 19
+doneSetEffectColor         ; 0, 18
     sta temp2hi            ; 3, 22
-    lda effectState       ; 3, 25  ; if effectState is 0 no jump to
+    lda effectState        ; 3, 25  ; if effectState is 0 no jump to
     beq resetBackground    ; 2, 27  ; resetBackground (done with effect)
     lsr                    ; 2, 29
     lsr                    ; 2, 31
@@ -1228,12 +1187,12 @@ doneSetEffectColor         ; 1, 19
     adc temp2hi            ; 3, 40
     jmp setBackground      ; 3, 43
 
-resetBackground            ; 1, 36
-    lda #SKYCOLOR               ; 2, 38
+resetBackground            ; +0, 19
+    lda #SKYCOLOR          ; 2, 21
 
-setBackground              ; 1, 44
-    sta WSYNC              ; 2, 46
-    sta COLUBK             ; 3, 49
+setBackground              ;
+    sta WSYNC              ; 3, 23/46
+    sta COLUBK             ; 3, 3
 
 end_draw_top_line
 
@@ -1246,155 +1205,165 @@ end_draw_top_line
     echo "------", [*], [* - $F000]d, "draw_playfield"
 
 draw_playfield
-    lda #1              ; 2, 5
-    sta temp3           ; 3, 8
-    ldx #PLAYFIELDSZ    ; 2, 10
-do_playfield            ; +1, [9,23]
-    sec                 ; 2, 25 ; ---------------------------------------------
-    txa                 ; 2, 27 ;
-    sbc m1ys            ; 3, 30 ; draw missile 0, max 16 cycles
-    adc #MISSILESIZE    ; 2, 32 ;
-    lda #2              ; 2, 34 ;
-    adc #$ff            ; 2, 36 ;
-    sta ENAM0           ; 3, 39 ; ---------------------------------------------
-    sec                 ; 2, 41
-    txa                 ; 2, 43 ; ---------------------------------------------
-    sbc m0ys            ; 3, 46 ; draw missile 1, max 16 cycles
-    adc #MISSILESIZE    ; 2, 48 ;
-    lda #2              ; 2, 50 ;
-    adc #$ff            ; 2, 52 ;
-    sta ENAM1           ; 3, 55 ; ---------------------------------------------
-    txa                 ; 2, 57 ; ---------------------------------------------
-    sec                 ; 2, 59 ; set up player1 - max  16 cycles
-    sbc nexty           ; 3, 62 ;
-    adc #ENEMYHEIGHT    ; 2, 64 ;
-    bcc finishedSprite  ; 2, 66 ;
-    tay                 ; 2, 68 ; 4 FREE CYCLES !!
-    sta WSYNC           ; 3, 71 ; ---------------------------------------------
-    lda (p1dataptrlo),y ; 6, 6  ; ---------------------------------------------
-    sta GRP1            ; 3, 9  ; draw player 1 w/ colors - max 17 cyles
-    lda (p1colorlo),y   ; 5, 14 ;
-    sta COLUP1          ; 3, 17 ; ---------------------------------------------
-    dex                 ; 2, 19 ;
-    bne do_playfield    ; 2, 21 ;
-    jmp draw_playfield_end ; 3, 24 ;
-finishedSprite          ; +1, 67 ;
-    cmp #$FF            ; 2, 69 ; we just finished the last line of a sprite
-    beq load_next_sprite; 2, 71 ;
-    sta WSYNC           ; 3, 74 ; 2 FREE CYCLES
-    dex                 ; 2, 2  ;
-    bne do_playfield    ; 2, 4  ;
-    jmp draw_playfield_end ; 3, 7  ;
-load_next_sprite        ; +1, 72
-    sta WSYNC           ; 3, 75 ; 1 FREE CYCLE
+    lda #1                  ; 2, 5     ;
+    sta temp3               ; 3, 8     ;
+    ldx #PLAYFIELDSZ        ; 2, 10    ;
+do_playfield                ;+1, 5 21
 
-    lda temp3           ; 3, 3  ;
-    cmp spritecount     ; 3, 6  ;
-    bcs no_more_sprites ; 2, 8 ;
+    sec                     ; 2, 12 23 ; ---------------------------------------------
+    txa                     ; 2, 14 25 ;
+    sbc m1ys                ; 3, 17 28 ; draw missile 0, max 16 cycles
+    adc #MISSILESIZE        ; 2, 19 30 ;
+    lda #2                  ; 2, 21 32 ;
+    adc #$ff                ; 2, 23 34 ;
+    sta ENAM0               ; 3, 26 37 ; ---------------------------------------------
+    sec                     ; 2, 28 39
+    txa                     ; 2, 30 41 ; ---------------------------------------------
+    sbc m0ys                ; 3, 33 44 ; draw missile 1, max 16 cycles
+    adc #MISSILESIZE        ; 2, 35 46 ;
+    lda #2                  ; 2, 37 48 ;
+    adc #$ff                ; 2, 39 50 ;
+    sta ENAM1               ; 3, 42 53 ; ---------------------------------------------
+    txa                     ; 2, 44 55 ; ---------------------------------------------
+    sec                     ; 2, 46 57 ; set up player1 - max  16 cycles
+    sbc nexty               ; 3, 49 60 ;
+    adc #ENEMYHEIGHT        ; 2, 51 62 ;
+    bcc finishedSprite      ; 2, 53 64 ;
+    tay                     ; 2, 55 66 ;
+    sta WSYNC               ; 3, 58 69 ; 7 free cycles
+    lda (p1dataptrlo),y     ; 5, 5     ; ---------------------------------------------
+    sta GRP1                ; 3, 8     ; write player graphics & color - max 17 cyles
+    lda (p1colorlo),y       ; 5, 13    ;
+    sta COLUP1              ; 3, 16    ; ---------------------------------------------
+    dex                     ; 2, 18    ;
+    bne do_playfield        ; 2, 20    ;
+    jmp draw_playfield_end  ; 3, 23    ;
+finishedSprite              ;+1, 54 65 ;
+    cmp #$FF                ; 2, 56 67 ; we just finished the last line of a sprite
+    beq load_next_sprite    ; 2, 58 69 ; need to load the next one
+    sta WSYNC               ; 3, 61 72 ; 4 FREE CYCLES
+    dex                     ; 2, 2     ;
+    bne do_playfield        ; 2, 4     ;
+    jmp draw_playfield_end  ; 3, 7     ;
+load_next_sprite            ;+1, 59 70 ;
+    sta WSYNC               ; 3, 62 73 ; 1 FREE CYCLE
 
-    stx temp1lo         ; 3, 11 ; dynamically load sprite data
-    tax                 ; 2, 13
-    lda spriteram,x     ; 4, 17 ; ""
-    sta p1dataptrlo     ; 3, 20 ; ""
-    lda spriteram+8,x   ; 4, 24 ; ""
-    sta p1dataptrhi     ; 3, 27 ; ""
+    lda temp3               ; 3, 3     ;
+    cmp spritecount         ; 3, 6     ;
+    bcs no_more_sprites     ; 2, 8     ;
 
-    ldy #17             ; 2, 29 ;
-    lda (p1dataptrlo),y ; 6*, 35 ;
-    sta p1colorlo       ; 3, 38 ;
-    iny                 ; 2, 40 ;
-    lda (p1dataptrlo),y ; 6*, 46 ;
-    sta p1colorhi       ; 3, 49 ;
+    stx temp1lo             ; 3, 11    ; load sprite data
+    ldx temp3               ; 2, 13
 
-    ldy temp3           ; 3, 52 ; get the next sprite from spriteramidx
-    ldx spriteramidx,y ; 4, 56 ; ""
-    inc temp3           ; 3, 59 ; ""
-    lda debrisy,x        ; 4, 63 ; ""
-    sta nexty           ; 3, 66 ; ""
+    lda spriteram,x         ; 4, 17    ; ""
+    sta p1dataptrlo         ; 3, 20    ; ""
+    lda spriteram+8,x       ; 4, 24    ; ""
+    sta p1dataptrhi         ; 3, 27    ; ""
 
-    lda debrisx,x        ; 4, 70 ; setup A and X for do_sprite_move
+    ldy #17                 ; 2, 29    ;
+    lda (p1dataptrlo),y     ; 6*, 35   ;
+    sta p1colorlo           ; 3, 38    ;
+    iny                     ; 2, 40    ;
+    lda (p1dataptrlo),y     ; 6*, 46   ;
+    sta p1colorhi           ; 3, 49    ;
 
-    sta WSYNC
-    sec                 ; 2, 2
-DivideLoop1             ; This loop MAX 54 cycles if A is < 160, MIN 4
-    sbc #15             ; 2, [4
-    bcs DivideLoop1     ; 2/3 [6,56]
-    tay                 ; 2, [8,58]
-    lda FineAdjustTableEnd,Y    ; 5, [13,63]
-    ldx #1
-    sta HMP0,X          ; 3  [19,69]
-    sta RESP0,x         ; 4  [23,73]
-    sta WSYNC           ; 3  [26,76]
-    sta HMOVE           ; 3, 3
+    ldy temp3               ; 3, 52    ; get the next sprite from spriteramidx
+    ldx spriteramidx,y      ; 4, 56    ; ""
+    inc temp3               ; 3, 59    ; ""
+    lda debrisy,x           ; 4, 63    ; ""
+    sta nexty               ; 3, 66    ; ""
 
-    ldx temp1lo         ; 3, 12 ;
-    dex                 ; 2, 14 ;
-    dex                 ; 2, 16 ;
-    dex                 ; 2, 18 ;
-    jmp do_playfield    ; 2, 20 ; checking dex is not required here - we know there is at least one more sprite
-no_more_sprites         ; +1, 9 ;
-    lda #$ef            ; 2, 11
-    sta nexty           ; 3, 14
-    dex                 ; 2, 16 ;
-    beq draw_playfield_end ; 2, 18 ;
-    jmp do_playfield    ; 2, 20 ;
-draw_playfield_end      ; [7,24]
+    lda debrisx,x           ; 4, 70    ; setup A and X for do_sprite_move
 
+    sta WSYNC               ; 3, 73    ; -----------------------------------
+    sec                     ; 2, 2     ; inline skipdraw
+DivideLoop1                 ;+1  7  52 ; This loop MAX 54 cycles if A is < 160, MIN 4
+    sbc #15                 ; 2, 4  54 ;
+    bcs DivideLoop1         ; 2, 6  56 ;
+    tay                     ; 2, 8  58 ;
+    lda FineAdjustTableEnd,Y; 5, 13 63 ;
+    ldx #1                  ; 2, 15 65 ;
+    sta HMP0,X              ; 4, 19 69 ;
+    sta RESP0,X             ; 4, 23 73 ;
+    sta WSYNC               ; 3, 26 76 ;
+    sta HMOVE               ; 3, 3     ;
+
+    ldx temp1lo             ; 3, 6     ;
+    dex                     ; 2, 8     ;
+    dex                     ; 2, 10    ;
+    dex                     ; 2, 12    ;
+    jmp do_playfield        ; 3, 15    ; checking dex is not required here - we know there is at least one more sprite
+no_more_sprites             ;+1, 9     ;
+    lda #$ef                ; 2, 11
+    sta nexty               ; 3, 14
+    dex                     ; 2, 16    ;
+    beq draw_playfield_end  ; 2, 18    ;
+    jmp do_playfield        ; 3, 21    ;
+draw_playfield_end          ;+1, 7 19 23 ;
+
+
+; draw_hills
 ;
-; Lunar hills just above the Lunokhod. If there is a debris sprite that
-; overlaps into this area it will be drawn.
+; draw the hills just above the lunokhod. we have at most 52 cycles
+; before the next line draws. p1dataptr and p1color were populated in
+; draw_playfield for  us.
+;
+; 4 scan lines
 ;
     echo "------", [*], [* - $F000]d, "draw_hills"
 
 draw_hills
-    sta HMCLR           ; 3, 27 ; so HMOVE's will not reposition debris
-    lda scrollpos       ; 3, 30
-    and #%11111100      ; 2, 32
-    clc                 ; 2, 34
-    adc #4              ; 2, 36
-    tax                 ; 2, 38
-    lda #SNOWCOLOR      ; 2, 40
-    sta COLUPF          ; 3, 43
-    lda #$FF            ; 2, 45
-    sta temp1lo         ; 3, 48 ; start the counter at FF (-1) this is
-                                ; allows us to continue using skipdraw with
-                                ; the current "nexty" for debris
-hills_loop              ; +1, 48
+    sta HMCLR           ; 3, 26 ; so HMOVE's will not reposition debris
 
-    sec                 ; 2, 50 ; skipdraw
-    sbc nexty           ; 3, 53 ;
-    adc #ENEMYHEIGHT    ; 2, 55 ;
-    bcs doDrawSprite    ; 2, 57 ;
-    sta WSYNC           ;       ; no sprite
+    lda scrollpos       ; 3, 29     ; calculate the PFData offset and
+    and #%11111100      ; 2, 31     ; put it in x
+    clc                 ; 2, 33     ;
+    adc #4              ; 2, 35     ;
+    tax                 ; 2, 37     ;
+
+    lda #SNOWCOLOR      ; 2, 39     ; change playfield color
+    sta COLUPF          ; 3, 42     ;
+
+    lda #$FF            ; 2, 44     ; initialize the debris counter at
+    sta temp1lo         ; 3, 47     ; FF, this allows us to continue
+                                    ; using skipdraw with 'nexty' from
+                                    ; draw_playfield
+
+hills_loop              ; +1, 42 47
+
+    sec                 ; 2, 49 ;
+    sbc nexty           ; 3, 52 ;
+    adc #ENEMYHEIGHT    ; 2, 54 ;
+    bcs doDrawSprite    ; 2, 56 ;
+    sta WSYNC           ; 3, 59      ;
     sta HMOVE           ; 3, 3  ;
-;    lda #0              ; 2, 5
-;    sta GRP1            ; 3, 8
     lda PFData0-1,X     ; 4, 7
     sta PF0             ; 3, 10
-    jmp overSprite      ; 4, 14
-doDrawSprite            ; 1, 58 ; draw the sprite
-    tay                 ; 2, 60
-    sta WSYNC           ; 3, 63
-    sta HMOVE           ; 3, 3
-    lda PFData0-1,X     ; 4, 7
-    sta PF0             ; 3, 10
+    jmp overSprite      ; 3, 13
+doDrawSprite            ; 1, 57 ; draw the sprite
+    tay                 ; 2, 59
     lda (p1dataptrlo),y ; 6, 16
+    sta WSYNC           ; 3, 62
+    sta HMOVE           ; 3, 3
     sta GRP1            ; 3, 19
-
-overSprite              ; [14,19]
-    lda PFData1-1,X     ; 4, 23
-    sta PF1             ; 3, 26
-    lda PFData2-1,X     ; 4, 30
-    sta PF2             ; 3, 33
-
-    dex                 ; 2, 35
-    dec temp1lo         ; 5, 40
-    lda temp1lo         ; 3, 43
-    cmp #$FB            ; 2, 45
-    bne hills_loop      ; 2, 47
-
+    lda (p1colorlo),y   ; 6, 16
+    sta COLUP1          ; 3, 19
+    lda PFData0-1,X     ; 4, 7
+    sta PF0             ; 3, 10
+overSprite              ;+1, 13
+    lda PFData1-1,X     ; 4, 17
+    sta PF1             ; 3, 20
+    lda PFData2-1,X     ; 4, 24
+    sta PF2             ; 3, 27
+;    sleep 9
+    dex                 ; 2, 29
+    dec temp1lo         ; 5, 34
+    lda temp1lo         ; 3, 37
+    cmp #$FB            ; 2, 39
+    bne hills_loop      ; 2, 41
 
 draw_hills_end
+
 
 ;
 ; Draw the sled and rail
@@ -1404,13 +1373,13 @@ draw_hills_end
 
 draw_sled_and_rail
 
-    lda #0              ; 2, 49
-    sta GRP1            ; 3, 52  ; turn off player1 graphics
-    sta ENAM0           ; 3, 55  ; turn off missiles
-    sta ENAM1           ; 3, 58  ;
+
+    lda #0              ; 2, 43
+    sta ENAM0           ; 3, 46  ; turn off missiles
+    sta ENAM1           ; 3, 49  ;
 
     sta WSYNC
-    sta HMOVE           ; 3, 3 ;
+;    sta HMOVE           ; 3, 3 ;
 
     sta COLUPF          ; 3, 6  ; set pf color to black for HMOVE hiding
     sta PF0             ; 3, 9  ; clear playfield data
@@ -1420,25 +1389,51 @@ draw_sled_and_rail
     lda #SNOWCOLOR      ; 2, 17 ; change the background color to white
     sta COLUBK          ; 3, 20 ; ""
 
-    lda p0x             ; 3, 23
-    ldx #0              ; 2, 25
-    jsr do_sprite_move  ; -,
     ldx #10
+
+    lda temp1lo         ;
+
 do_sled
+
+    sec                 ; 2
+    sbc nexty           ; 3,  ;
+    adc #ENEMYHEIGHT    ; 2,  ;
+    bcs doDrawSprite2; 2,  ;
+    sta WSYNC
     lda PlayerSprite,X
-    sta GRP0
+    sta GRP0                   ; 45
     lda PlayerColor,X
     sta COLUP0
+
+    jmp overSprite2
+doDrawSprite2
+    tay
+    lda (p1dataptrlo),y ; 6,        ;
     sta WSYNC
+    sta GRP1
+    lda (p1colorlo),y   ; 6, 16
+    sta COLUP1          ; 3, 19    ; 3,
+
+    lda PlayerSprite,X
+    sta GRP0                   ; 45
+    lda PlayerColor,X
+    sta COLUP0    ;
+
+overSprite2
+    dec temp1lo
+    lda temp1lo
     dex
     cpx #0
     bne do_sled
+;; TEMP
+    stx GRP1
+;; END TEMP
 
-    lda #RAILCOLOR
-    sta COLUBK
+;    lda #RAILCOLOR
+;    sta COLUBK
     lda PlayerSprite,X
-    sta GRP0
     sta WSYNC
+    sta GRP0
 
     lda #PLATFORMCOLOR
     sta COLUBK
@@ -1502,16 +1497,27 @@ draw_radar
     sta NUSIZ0          ; 3, 8
     sta NUSIZ1          ; 3, 11
 
-    lda radarColor      ; 3, 14
-    asl                 ; 2, 16
-    sta radarColor      ; 3, 19
-    and #%10000000      ; 2, 21
-    beq normalRadarColor; 2, 23
-    lda #$1e             ; 2, 25
-    jmp setColor        ; 3, 28
-normalRadarColor        ; +1, 24
-    lda #RADARCOLOR     ; 2, 26
-    nop                 ; 2, 28
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    lda #$8e
+    jmp setColor
+
+; old radar color code - leave this here for now
+;    lda radarColor      ; 3, 14
+;    asl                 ; 2, 16
+;    sta radarColor      ; 3, 19
+;    and #%10000000      ; 2, 21
+;    beq normalRadarColor; 2, 23
+;    lda #$1e             ; 2, 25
+;    jmp setColor        ; 3, 28
+;normalRadarColor        ; +1, 24
+;    lda #RADARCOLOR     ; 2, 26
+;    nop                 ; 2, 28
+
 setColor
     sta COLUP0          ; 3, 31
     sta COLUP1          ; 3, 34
@@ -1546,17 +1552,26 @@ radar_loop              ; +1, 5
     sta GRP0            ; 3, 47
     sty GRP1            ; 3, 50
 
-    lda radarColor      ; 3, 53
-    asl                 ; 2, 55
-    sta radarColor      ; 3, 58
-
-    and #%10000000      ; 2, 60
-    beq normalRadarColor2 ; 2, 62
-    lda #$1e            ; 2, 64
-    jmp setColor2       ; 3, 67
-normalRadarColor2       ; +1, 63
-    lda #RADARCOLOR     ; 2, 65
-    nop                 ; 2, 67
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    lda #$8e
+    jmp setColor2
+; old radar color code - leave here for now
+;    lda radarColor      ; 3, 53
+;    asl                 ; 2, 55
+;    sta radarColor      ; 3, 58
+;
+;    and #%10000000      ; 2, 60
+;    beq normalRadarColor2 ; 2, 62
+;    lda #$1e            ; 2, 64
+;    jmp setColor2       ; 3, 67
+;normalRadarColor2       ; +1, 63
+;    lda #RADARCOLOR     ; 2, 65
+;    nop                 ; 2, 67
 setColor2
     sta COLUP0          ; 3, 70
     sta COLUP1          ; 3, 73
@@ -1615,7 +1630,7 @@ draw_radar_end
 overscan_start
     lda #2              ; turn on the vblank
     sta VBLANK          ; ""
-    lda  #32          ; wait for 4544 cycles then sync
+    lda  #34          ; wait for 4544 cycles then sync
     sta  TIM64T         ; ""
 overscan_start_end
 
@@ -1686,8 +1701,17 @@ no_pm1_collision
     bcc m1_collision_loop
 
 no_m1_collision
-    sta CXCLR
+
+    ; check for player/player collision
+    lda CXPPMM
+    and #%10000000
+    beq do_collisions_end
+    lda #MODE_GAME_OVER
+    sta gameMode
+
 do_collisions_end
+    sta CXCLR
+
 
 ; swap_missiles2
 ;
@@ -1717,22 +1741,31 @@ swap_missiles2_end
 
 check_console_input
 
+    lda SWCHB                   ; if the reset button is not pressed
+    lsr                         ; skip the down check
+    bcs resetNotPressed         ;
 
-    lda SWCHB                   ; check the reset switch is being
-    and #%00000001              ; pressed
-    bne do_joystick             ;
-    lda #MODE_RESET             ;
+    lda #MODE_RESET_DOWN        ; set state to MODE_RESET_DOWN
+    sta gameMode                ;
+    jmp do_joystick_end
+
+resetNotPressed
+
+    lda gameMode                ; reset button is up and we are currently
+    cmp #MODE_RESET_DOWN        ; not in
+    bne do_joystick
+
+    lda #MODE_RESET             ; set state to MODE_RESET_DOWN
     sta gameMode                ;
     jmp do_joystick_end
 
 do_joystick
+
     lda gameMode
-    cmp #255
-    beq do_joystick_end
-    cmp #254
-    beq do_joystick_end
     cmp #0
     beq do_joystick_end
+    cmp #252
+    bcs do_joystick_end
 
     lda INPT4           ; first check the trigger
     bmi no_button
@@ -1751,9 +1784,11 @@ do_joystick_1
     inc p0s
     jmp check_bounds
 do_slowdown
-    lda frameCount
-    and #%00000111
-    bne do_joystick_end
+
+;    lda frameCount
+;    and #%00000011
+;    bne do_joystick_end
+
     lda p0s
     beq do_joystick_end
     bmi do_left_slowdown
@@ -1878,13 +1913,13 @@ skip_positioning
 
 create_debris
 
-    lda gameMode                    ; do not create debris if we are in
-    cmp #MODE_IN_PROGRESS           ; the wrong gameMode
+    lda gameMode                    ; only create new debris if the game
+    cmp #MODE_IN_PROGRESS           ; is in progress
     beq ce_continue                 ;
     jmp create_debris_end           ;
 ce_continue                         ;
 
-    lda #40                         ; load waveLimit into a
+    lda #20                         ; load waveLimit into a
                                     ; todo: multiply by vertical speed
     cmp waveCounter                 ; compare a to waveCounter
     bne skip_gameMode_change2           ; if a != limit, skip the rest
@@ -1905,8 +1940,8 @@ skip_gameMode_change2                   ;
     beq create_debris_end           ; ""
 
     lda debrisy                     ; make sure there is enough space
-    cmp #PLAYFIELDSZ-8              ; for new debris. todo: double this
-    bcs create_debris_end           ; when pace bit not set
+    cmp #PLAYFIELDSZ-8              ; for new debris.
+    bcs create_debris_end           ;
 
     ldx #6                          ; shift the list down (this can take
 shift_down                  ; +1    ; up to 350 cycles - ouch!)
@@ -1925,20 +1960,46 @@ done_shift_down                     ;
     lda #PLAYFIELDSZ+11             ; set the y position for the new
     sta debrisy                     ; debris
 
-    lda frameCount                  ; create a random number for
-    beq doEor                       ; horizontal positioning. TODO:
-    asl                             ; would really like this to create
-    beq noEor                       ; a repeatable pattern.
-    bcc noEor
-doEor
-    eor #$1d
-noEor                               ;
-    sta debrisvx                    ;
+    jsr update_random_seed
 
     and #%00111000                  ; use the random number generated
     sta debrisinfo                  ; for position to set the debris
                                     ; info (type of sprite, fall
                                     ; direction)
+
+    lda randomSeed
+    cmp #128
+    bcs skipDirectionChange
+
+    lda direction
+    eor #$FF
+    sta direction
+
+skipDirectionChange
+
+    lda direction
+    cmp #0
+    beq rightDirection
+
+    lda randomSeed
+    ora #%0010000
+    and #%0011111
+    clc
+    adc debrisvx,1
+    sta debrisvx
+    jmp doneDirection
+
+rightDirection
+
+    lda randomSeed
+    ora #%0010000
+    and #%0011111
+    eor #$FF
+    sec
+    adc debrisvx,1
+    sta debrisvx
+
+doneDirection
 
     inc waveCounter
     inc debrisCount
@@ -2020,7 +2081,7 @@ map_debris
     beq map_debris_done
 
     ldx #0
-    stx radarColor
+;    stx radarColor
     lda debrisy         ; calculate what will be the starting y coord on the map
     sec                 ; "" divide by 21
 DivideBy22              ; +1
@@ -2032,21 +2093,21 @@ DivideBy22              ; +1
     ldx #0
 map_debris_loop
 
-    lda radarColor
-    asl
-    sta radarColor
+;    lda radarColor
+;    asl
+;    sta radarColor
 
     lda debrisinfo,x    ; skip the enmy if it has been condemned
     and #%00000001      ; ""
     cmp #%00000001      ; ""
     beq skip_debris     ; ""
 
-    lda debrisinfo,x
-    and #%00011000
-    cmp #%00011000
-    bne notRadioactive
-    inc radarColor
-notRadioactive
+;    lda debrisinfo,x
+;    and #%00011000
+;    cmp #%00011000
+;    bne notRadioactive
+;    inc radarColor
+;notRadioactive
 
     ldy #0
     lda debrisvx,x
@@ -2218,15 +2279,35 @@ DivideLoop              ; This loop MAX 54 cycles if A is < 160, MIN 4
 convert_virtual_xpos
     sec                 ; 2, 2
     sbc vxoffsetlo      ; 3, 5
-    cmp #1              ; 2, 7
+    cmp #MINXSCREEN              ; 2, 7
     bcc off_screen      ; 2, 9
-    cmp #160            ; 2, 11
+    cmp #MAXXSCREEN            ; 2, 11
     bcs off_screen      ; 2, 13
     rts                 ; 6, 19
 off_screen              ; +1, 14
     lda #$FF            ; 2, 16
     rts                 ; 6, 22
 convert_virtual_xpos_end
+
+; update our random seed
+
+    echo "------", [*], [* - $F000]d, "update_random_seed"
+
+update_random_seed:
+
+    lda randomSeed
+    beq doEor
+    asl
+    beq noEor
+    bcc noEor
+doEor
+    eor #$1d
+noEor
+    sta randomSeed
+    rts
+
+update_random_seed_end
+
 
     echo "------", [*], [* - $F000]d, "code done, before ALIGN"
 
@@ -2297,7 +2378,80 @@ map_debris_table
 
 ; offset 48
 
-    echo "------", [*], [* - $F000]d, "moveTable"
+; one entry per wave, controls vertical speed
+
+vSpeedTable
+    .byte #%00000011
+    .byte #%00000000
+    .byte #%00000001
+    .byte #%00000000
+
+    .byte #%00000000
+    .byte #%00000000
+    .byte #%00000000
+    .byte #%00000000
+
+    .byte #%00000001
+    .byte #%00000001
+    .byte #%00000001
+    .byte #%00000001
+
+    .byte #%00000000
+    .byte #%00000000
+    .byte #%00000000
+    .byte #%00000000
+
+; one entry per wave, controls game behavior
+;
+;     0 - 5 horizontal speed mask (11111 special case)
+;     5      horizontal speed multiplier
+;     6-8    vertical speed mask
+;
+;
+
+hSpeedTable
+
+    .byte #%00011111
+    .byte #%00001111
+    .byte #%00000111
+    .byte #%00000011
+
+    .byte #%00011111
+    .byte #%00001111
+    .byte #%00000001
+    .byte #%10000000
+
+    .byte #%00001111
+    .byte #%00000111
+    .byte #%00000011
+    .byte #%00000001
+
+    .byte #%00000111
+    .byte #%00000011
+    .byte #%00000001
+    .byte #%00000000
+
+tempoTable
+    .byte #10
+    .byte #9
+    .byte #8
+    .byte #7
+
+    .byte #6
+    .byte #10
+    .byte #9
+    .byte #8
+
+    .byte #6
+    .byte #7
+    .byte #8
+    .byte #9
+
+    .byte #6
+    .byte #7
+    .byte #8
+    .byte #9
+
 
 ; moveTable bits
 ;   0 = unused
@@ -2309,13 +2463,25 @@ map_debris_table
 ;   6 & 7 = move adder
 moveTable              ; if and table is 3 then horizontal movement is slower
     .byte #%00000001  ; 000 absorber    down
-    .byte #%00100001  ; 001 medium rock right
-    .byte #%00100010  ; 010 small rock  right
+    .byte #%00100010  ; 001 medium rock right
+    .byte #%00100001  ; 010 small rock  right
     .byte #%00100001  ; 011 radioactive right
-    .byte #%01000001  ; 100 medium rock left
+    .byte #%01000010  ; 100 medium rock left
     .byte #%00000001  ; 101 rock        down
-    .byte #%01000010  ; 110 small       left
+    .byte #%01000001  ; 110 small       left
     .byte #%01000001  ; 111 radioactive left
+
+; signed integer offset for debris movement by wave
+
+sineTable
+    .byte #%00000001  ; move right 1
+    .byte #%00000001  ; move right
+    .byte #%00000001  ; move right 1
+    .byte #%00000001  ; move right 1
+    .byte #%11111111  ; move left
+    .byte #%11111111  ; move left 1
+    .byte #%11111111  ; move left 1
+    .byte #%11111111  ; move left 1
 
     echo "------", [*], [* - $F000]d, "radarBitMask"
 
@@ -2378,30 +2544,14 @@ spriteTable
 sprite1FrameTable
     .byte #<sprite1Frame1
     .byte #>sprite1Frame1
-    .byte #<sprite1Frame2
-    .byte #>sprite1Frame2
     .byte #<sprite1Frame3
     .byte #>sprite1Frame3
-    .byte #<sprite1Frame4
-    .byte #>sprite1Frame4
     .byte #<sprite1Frame5
     .byte #>sprite1Frame5
-    .byte #<sprite1Frame6
-    .byte #>sprite1Frame6
     .byte #<sprite1Frame7
     .byte #>sprite1Frame7
-    .byte #<sprite1Frame8
-    .byte #>sprite1Frame8
 
 sprite2FrameTable
-    .byte #<sprite2Frame1
-    .byte #>sprite2Frame1
-    .byte #<sprite2Frame1
-    .byte #>sprite2Frame1
-    .byte #<sprite2Frame2
-    .byte #>sprite2Frame2
-    .byte #<sprite2Frame2
-    .byte #>sprite2Frame2
     .byte #<sprite2Frame1
     .byte #>sprite2Frame1
     .byte #<sprite2Frame1
@@ -2420,60 +2570,29 @@ sprite3FrameTable
     .byte #>sprite3Frame1
     .byte #<sprite3Frame1
     .byte #>sprite3Frame1
-    .byte #<sprite3Frame1
-    .byte #>sprite3Frame1
-    .byte #<sprite3Frame1
-    .byte #>sprite3Frame1
-    .byte #<sprite3Frame1
-    .byte #>sprite3Frame1
-    .byte #<sprite3Frame1
-    .byte #>sprite3Frame1
 
 sprite4FrameTable           ; left left
     .byte #<sprite4Frame1
     .byte #>sprite4Frame1
-    .byte #<sprite4Frame1
-    .byte #>sprite4Frame1
-    .byte #<sprite4Frame2
-    .byte #>sprite4Frame2
     .byte #<sprite4Frame2
     .byte #>sprite4Frame2
     .byte #<sprite4Frame3
     .byte #>sprite4Frame3
-    .byte #<sprite4Frame3
-    .byte #>sprite4Frame3
     .byte #<sprite4Frame2
     .byte #>sprite4Frame2
-    .byte #<sprite4Frame2
-    .byte #>sprite4Frame2
+
 
 sprite5FrameTable           ; right right
     .byte #<sprite5Frame1
     .byte #>sprite5Frame1
-    .byte #<sprite5Frame1
-    .byte #>sprite5Frame1
-    .byte #<sprite5Frame2
-    .byte #>sprite5Frame2
     .byte #<sprite5Frame2
     .byte #>sprite5Frame2
     .byte #<sprite5Frame3
     .byte #>sprite5Frame3
-    .byte #<sprite5Frame3
-    .byte #>sprite5Frame3
-    .byte #<sprite5Frame2
-    .byte #>sprite5Frame2
     .byte #<sprite5Frame2
     .byte #>sprite5Frame2
 
 sprite6FrameTable
-    .byte #<sprite6Frame1
-    .byte #>sprite6Frame1
-    .byte #<sprite6Frame1
-    .byte #>sprite6Frame1
-    .byte #<sprite6Frame2
-    .byte #>sprite6Frame2
-    .byte #<sprite6Frame2
-    .byte #>sprite6Frame2
     .byte #<sprite6Frame1
     .byte #>sprite6Frame1
     .byte #<sprite6Frame1
@@ -2492,28 +2611,12 @@ sprite7FrameTable
     .byte #>sprite7Frame2
     .byte #<sprite7Frame2
     .byte #>sprite7Frame2
-    .byte #<sprite7Frame1
-    .byte #>sprite7Frame1
-    .byte #<sprite7Frame1
-    .byte #>sprite7Frame1
-    .byte #<sprite7Frame2
-    .byte #>sprite7Frame2
-    .byte #<sprite7Frame2
-    .byte #>sprite7Frame2
 
 explosionFrameTable
     .byte #<explosionSprite1
     .byte #>explosionSprite1
     .byte #<explosionSprite1
     .byte #>explosionSprite1
-    .byte #<explosionSprite1
-    .byte #>explosionSprite1
-    .byte #<explosionSprite1
-    .byte #>explosionSprite1
-    .byte #<explosionSprite2
-    .byte #>explosionSprite2
-    .byte #<explosionSprite2
-    .byte #>explosionSprite2
     .byte #<explosionSprite2
     .byte #>explosionSprite2
     .byte #<explosionSprite2
@@ -2539,26 +2642,6 @@ sprite1Frame1
         .byte #%00000000
     .byte #<boltColors1
     .byte #>boltColors1
-sprite1Frame2
-        .byte #%00000000
-        .byte #%00000000
-        .byte #%00000001
-        .byte #%00000010
-        .byte #%00000110
-        .byte #%00001100
-        .byte #%00011100
-        .byte #%00111000
-        .byte #%01111100
-        .byte #%00111110
-        .byte #%00011100
-        .byte #%00111000
-        .byte #%00110000
-        .byte #%01100000
-        .byte #%01000000
-        .byte #%10000000
-        .byte #%00000000
-    .byte #<boltColors2
-    .byte #>boltColors2
 sprite1Frame3
         .byte #%00000000
         .byte #%00000000
@@ -2579,26 +2662,6 @@ sprite1Frame3
         .byte #%00000000
     .byte #<boltColors3
     .byte #>boltColors3
-sprite1Frame4
-        .byte #%00000000
-        .byte #%00000000
-        .byte #%00000001
-        .byte #%00000010
-        .byte #%00000110
-        .byte #%00001100
-        .byte #%00011100
-        .byte #%00111000
-        .byte #%01111100
-        .byte #%00111110
-        .byte #%00011100
-        .byte #%00111000
-        .byte #%00110000
-        .byte #%01100000
-        .byte #%01000000
-        .byte #%10000000
-        .byte #%00000000
-    .byte #<boltColors4
-    .byte #>boltColors4
 sprite1Frame5
         .byte #%00000000
         .byte #%00000000
@@ -2619,26 +2682,6 @@ sprite1Frame5
         .byte #%00000000
     .byte #<boltColors5
     .byte #>boltColors5
-sprite1Frame6
-        .byte #%00000000
-        .byte #%00000000
-        .byte #%00000001
-        .byte #%00000010
-        .byte #%00000110
-        .byte #%00001100
-        .byte #%00011100
-        .byte #%00111000
-        .byte #%01111100
-        .byte #%00111110
-        .byte #%00011100
-        .byte #%00111000
-        .byte #%00110000
-        .byte #%01100000
-        .byte #%01000000
-        .byte #%10000000
-        .byte #%00000000
-    .byte #<boltColors6
-    .byte #>boltColors6
 sprite1Frame7
         .byte #%00000000
         .byte #%00000000
@@ -2659,26 +2702,6 @@ sprite1Frame7
         .byte #%00000000
     .byte #<boltColors7
     .byte #>boltColors7
-sprite1Frame8
-        .byte #%00000000
-        .byte #%00000000
-        .byte #%00000001
-        .byte #%00000010
-        .byte #%00000110
-        .byte #%00001100
-        .byte #%00011100
-        .byte #%00111000
-        .byte #%01111100
-        .byte #%00111110
-        .byte #%00011100
-        .byte #%00111000
-        .byte #%00110000
-        .byte #%01100000
-        .byte #%01000000
-        .byte #%10000000
-        .byte #%00000000
-    .byte #<boltColors8
-    .byte #>boltColors8
 
 sprite2Frame1
     .byte #%00000000
@@ -3014,24 +3037,6 @@ DebrisColor2
     .byte #$34
     .byte #$32
 
-boltColors8
-    .byte #$0e
-    .byte #$1e
-    .byte #$1a
-    .byte #$18
-    .byte #$16
-    .byte #$14
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
 boltColors7
     .byte #$0e
     .byte #$18
@@ -3043,24 +3048,6 @@ boltColors7
     .byte #$14
     .byte #$12
     .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-boltColors6
-    .byte #$0e
-    .byte #$14
-    .byte #$16
-    .byte #$18
-    .byte #$1a
-    .byte #$1e
-    .byte #$1a
-    .byte #$18
-    .byte #$16
-    .byte #$14
     .byte #$12
     .byte #$12
     .byte #$12
@@ -3086,24 +3073,6 @@ boltColors5
     .byte #$12
     .byte #$12
     .byte #$12
-boltColors4
-    .byte #$0e
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$14
-    .byte #$16
-    .byte #$18
-    .byte #$1a
-    .byte #$1e
-    .byte #$1a
-    .byte #$18
-    .byte #$16
-    .byte #$14
-    .byte #$12
-    .byte #$12
-    .byte #$12
 boltColors3
     .byte #$0e
     .byte #$12
@@ -3122,24 +3091,6 @@ boltColors3
     .byte #$16
     .byte #$14
     .byte #$12
-boltColors2
-    .byte #$0e
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$12
-    .byte #$14
-    .byte #$16
-    .byte #$18
-    .byte #$1a
-    .byte #$1e
-    .byte #$1a
-    .byte #$18
-    .byte #$16
 boltColors1
     .byte #$0e
     .byte #$12
@@ -3245,85 +3196,85 @@ scoreTable
     .byte #>scoreNine
 
 scoreZero
-   .byte #%00111000
-   .byte #%01000100
-   .byte #%01000100
-   .byte #%01000100
-   .byte #%01000100
-   .byte #%01000100
-   .byte #%00111000
+    .byte #%01111100
+    .byte #%01000100
+    .byte #%01000100
+    .byte #%01000100
+    .byte #%01000100
+    .byte #%01000100
+    .byte #%01111100
 scoreOne
-   .byte #%00111000
-   .byte #%00010000
-   .byte #%00010000
-   .byte #%00010000
-   .byte #%00010000
-   .byte #%00110000
-   .byte #%00010000
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%00000100
 scoreTwo
-   .byte #%01111100
-   .byte #%00100000
-   .byte #%00010000
-   .byte #%00001000
-   .byte #%00000100
-   .byte #%01000100
-   .byte #%00111000
+    .byte #%01111100
+    .byte #%01000000
+    .byte #%01000000
+    .byte #%01111100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%01111100
 scoreThree
-   .byte #%00111000
-   .byte #%01000100
-   .byte #%00000100
-   .byte #%00111000
-   .byte #%00000100
-   .byte #%01000100
-   .byte #%00111000
+    .byte #%01111100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%01111100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%01111100
 scoreFour
-   .byte #%00001000
-   .byte #%00001000
-   .byte #%00001000
-   .byte #%01111100
-   .byte #%01001000
-   .byte #%01001000
-   .byte #%01001000
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%01111100
+    .byte #%01000100
+    .byte #%01000100
+    .byte #%01000100
 scoreFive
-   .byte #%00111000
-   .byte #%01000100
-   .byte #%00000100
-   .byte #%00000100
-   .byte #%01111000
-   .byte #%01000000
-   .byte #%01111100
+    .byte #%01111100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%01111100
+    .byte #%01000000
+    .byte #%01000000
+    .byte #%01111100
 scoreSix
-   .byte #%00111000
-   .byte #%01000100
-   .byte #%01000100
-   .byte #%01111000
-   .byte #%01000000
-   .byte #%01000100
-   .byte #%00111000
+    .byte #%01111100
+    .byte #%01000100
+    .byte #%01000100
+    .byte #%01111100
+    .byte #%01000000
+    .byte #%01000000
+    .byte #%01111100
 scoreSeven
-   .byte #%00100000
-   .byte #%00100000
-   .byte #%00010000
-   .byte #%00001000
-   .byte #%00000100
-   .byte #%00000100
-   .byte #%01111000
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%01111100
 scoreEight
-   .byte #%00111000
-   .byte #%01000100
-   .byte #%01000100
-   .byte #%00111000
-   .byte #%01000100
-   .byte #%01000100
-   .byte #%00111000
+    .byte #%01111100
+    .byte #%01000100
+    .byte #%01000100
+    .byte #%01111100
+    .byte #%01000100
+    .byte #%01000100
+    .byte #%01111100
 scoreNine
-   .byte #%00111000
-   .byte #%01000100
-   .byte #%00000100
-   .byte #%00111100
-   .byte #%01000100
-   .byte #%01000100
-   .byte #%00111000
+    .byte #%01111100
+    .byte #%00000100
+    .byte #%00000100
+    .byte #%01111100
+    .byte #%01000100
+    .byte #%01000100
+    .byte #%01111100
 
     echo "------", [*], [* - $F000]d, "radarColorTable"
 
@@ -3337,85 +3288,59 @@ radarColorTable
     .byte #$08  ; inert debris
     .byte #$1e  ; radioactive
 
+    echo "------", [*], [* - $F000]d, "songLoopIntro"
 
-song_loop_intro
+songLoopIntro
 
-    .byte #ME_TONE0,    #8,     #0
-    .byte #ME_PITCH0,   #0,     #0
-    .byte #ME_VOL0,     #8,     #1
-    .byte #ME_VOL0,     #0,     #24
-    .byte #ME_TONE0,    #8,     #0
-    .byte #ME_PITCH0,   #0,     #0
-    .byte #ME_VOL0,     #8,     #1
-    .byte #ME_VOL0,     #0,     #24
-    .byte #ME_TONE0,    #8,     #0
-    .byte #ME_PITCH0,   #0,     #0
-    .byte #ME_VOL0,     #8,     #1
-    .byte #ME_VOL0,     #0,     #24
-    .byte #ME_TONE0,    #8,     #0
-    .byte #ME_PITCH0,   #0,     #0
-    .byte #ME_VOL0,     #8,     #1
-    .byte #ME_VOL0,     #0,     #24
-    .byte #ME_END,     #<song_loop, #>song_loop
+    .byte #0, #8, #8, #1
+    .byte #0, #8, #0, #24
+    .byte #0, #8, #8, #1
+    .byte #0, #8, #0, #24
+    .byte #0, #8, #8, #1
+    .byte #0, #8, #0, #24
+    .byte #0, #8, #8, #1
+    .byte #0, #8, #0, #24
 
-song_loop
+songLoop
 
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #29,    #0  ; 1
-    .byte #ME_VOL0,     #14,    #11
-    .byte #ME_VOL0,     #2,     #8
-    .byte #ME_VOL0,     #0,     #17
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #25,    #0  ; 1
-    .byte #ME_VOL0,     #14,    #9
-    .byte #ME_VOL0,     #2,     #3
+    .byte #30, #SONGTONE, #15, #11
+    .byte #30, #SONGTONE, #2, #8
+    .byte #30, #SONGTONE, #0, #17
 
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #25,    #0  ; 1
-    .byte #ME_VOL0,     #14,    #9
-    .byte #ME_VOL0,     #2,     #3
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #25,    #0  ; 1
-    .byte #ME_VOL0,     #14,    #9
-    .byte #ME_VOL0,     #2,     #3
+    .byte #25, #SONGTONE, #15, #9
+    .byte #25, #SONGTONE, #2, #3
 
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #25,    #0  ; 1
-    .byte #ME_VOL0,     #14,    #9
-    .byte #ME_VOL0,     #2,     #4
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #22,    #0  ; 1
-    .byte #ME_VOL0,     #12,    #3
-    .byte #ME_VOL0,     #12,    #5
-    .byte #ME_VOL0,     #2,     #5
+    .byte #25, #SONGTONE, #15, #9
+    .byte #25, #SONGTONE, #2, #3
 
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #22,    #0  ; 1
-    .byte #ME_VOL0,     #14,    #8
-    .byte #ME_VOL0,     #2,     #8
-    .byte #ME_VOL0,     #0,     #18
+    .byte #29, #SONGTONE, #15, #9
+    .byte #29, #SONGTONE, #2, #4
 
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #18,    #0  ; 1
-    .byte #ME_VOL0,     #14,    #9
-    .byte #ME_VOL0,     #2,     #3
+    .byte #25, #SONGTONE, #15, #9
+    .byte #25, #SONGTONE, #2, #4
 
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #18,    #0  ; B3
-    .byte #ME_VOL0,     #14,    #9
-    .byte #ME_VOL0,     #2,     #3
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #16,    #0
-    .byte #ME_VOL0,     #14,    #9
-    .byte #ME_VOL0,     #2,     #3
+    .byte #23, #SONGTONE, #15, #3
+    .byte #23, #SONGTONE, #12, #5
+    .byte #23, #SONGTONE, #2, #5
 
-    .byte #ME_TONE0,    #6,     #0
-    .byte #ME_PITCH0,   #16,    #0  ; B4
-    .byte #ME_VOL0,     #14,    #9
-    .byte #ME_VOL0,     #2,     #7
-    .byte #ME_VOL0,     #0,     #8
+    .byte #22, #SONGTONE, #15, #12
+    .byte #22, #SONGTONE, #2, #6
+    .byte #22, #SONGTONE, #0, #16
 
-    .byte #ME_END,     #<song_loop, #>song_loop
+    .byte #18, #SONGTONE, #15, #9
+    .byte #18, #SONGTONE, #2, #3
+
+    .byte #18, #SONGTONE, #15, #9
+    .byte #18, #SONGTONE, #2, #3
+
+    .byte #16, #SONGTONE, #15, #9
+    .byte #16, #SONGTONE, #2, #3
+
+    .byte #16, #SONGTONE, #15, #9
+    .byte #16, #SONGTONE, #2, #7
+    .byte #16, #SONGTONE, #0, #9
+
+    .byte #255, #32, #0, #0
 
     echo "------", [*], [* - $F000]d, "include pfdata.asm"
 
