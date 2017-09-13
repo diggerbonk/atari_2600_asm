@@ -3,8 +3,6 @@ rm -f *.sym
 
 if [[ "$1" == "clean" ]] ; then
     rm -f pfdata.asm
-    rm -f tsdata.asm
-    rm -f tsdata2.asm
     rm -f lunokhod1.bin
     rm -f lunokhod1.sym
     rm -f *.zip
