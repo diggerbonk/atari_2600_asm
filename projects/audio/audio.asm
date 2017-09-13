@@ -1,6 +1,6 @@
-; 
+;
 ; Basic 2600 ASM Template
-; 
+;
 ; AtariMusicEngine
 ;
 ;
@@ -11,7 +11,7 @@
 ;         First Byte
 ;             bit 7 : channel
 ;             bits 6-0 : event type
-;         Second Byte : Value1 
+;         Second Byte : Value1
 ;         Third Byte : Value2 (Usually time to next event)
 ;
 ;     Event Types
@@ -20,7 +20,7 @@
 ;         3) Set distortion for channel
 
 ;         5) Jump to another song location (address to go to. NOTE: jump to location 0 to end the song)
-;         6) Set Loop Counter 
+;         6) Set Loop Counter
 ;         7) Decriment loop counter
 ;         8) Evaluate loop counter
 ;
@@ -40,7 +40,7 @@
     echo "------", [*], [* - $F000]d, "macro defs"
 ;
 ; Macro Definitions
-; 
+;
 
     MAC VBLANK_START
     lda #2              ; wait for horizontal sync
@@ -92,11 +92,11 @@ waitOnOverscan          ; wait for overscan to finish
 
     echo "------", [*], [* - $F000]d, "variables"
 
-; 
+;
 ; Variable declarations
-;                                                       
+;
 
-aud0ptrlo       equ  $80 
+aud0ptrlo       equ  $80
 aud0ptrhi       equ  $81
 
 meCounter       equ  $82
@@ -142,7 +142,7 @@ sysinit_clear
     pha
     bne sysinit_clear
 
-; 
+;
 ; Non-system initialization
 ;
 
@@ -152,8 +152,8 @@ sysinit_clear
     echo "------", [*], [* - $F000]d, "main loop"
 
 ;
-; main_loop: 
-; 
+; main_loop:
+;
 ; This is comprised of the following sections:
 ;     1) vertical sync/blank
 ;     2) kernel
@@ -170,10 +170,10 @@ main_loop
     inc frameCounter
 
     echo "------", [*], [* - $F000]d, "do_audio"
-    
+
 do_audio0
 
-    lda aud0ptrhi       ; 3, 3  ; if the audio pointer is not set we skip 
+    lda aud0ptrhi       ; 3, 3  ; if the audio pointer is not set we skip
     cmp #0              ; 2, 5  ; ""
     beq do_audio0_leap  ; 2, 7  ; ""
 
@@ -213,7 +213,7 @@ do_audio0_leap
     jmp do_audio0_end   ; 3     ; unknown event! skip it
 doPitch
     ldx tempVar
-    sta AUDF0,x         ; 4 
+    sta AUDF0,x         ; 4
     jmp da0_duration    ; 3
 doVolume
     ldx tempVar
@@ -253,7 +253,7 @@ da0_stop
     sta aud0ptrhi
     jmp do_audio0_end
 
-da0_duration    
+da0_duration
     iny                 ; 2
     lda (aud0ptrlo),y   ; 5
     sta meCounter       ; 3
@@ -264,7 +264,7 @@ da0_increment
     ldy #0
 da0_increment1
     ; add 3 to the current song pointer
-    clc 
+    clc
     lda aud0ptrlo
     adc #3
     sta aud0ptrlo
@@ -277,7 +277,7 @@ da0_increment1
     jmp da0_run_next
 
 do_audio0_end
-    
+
 setup_song0
     lda setFirstSong
     cmp #0
@@ -301,10 +301,10 @@ setup_song0_end
 
     echo "------", [*], [* - $F000]d, "end code"
 
-; 
+;
 ; Audio Data:
 ;     1) eventType/channel
-;     2) value 
+;     2) value
 ;     3) value2 (usually duration)
 ;
 
@@ -321,56 +321,56 @@ firstSong1
     .byte #ME_VOL0,     #14,    #0
     .byte #ME_PITCH0,   #19,    #0
     .byte #ME_VOL1,     #8,     #1
-    .byte #ME_VOL1,     #0,     #2
-    .byte #ME_VOL0,     #0,     #1                      
+    .byte #ME_VOL1,     #0,     #9
+    .byte #ME_VOL0,     #0,     #1
 
-    .byte #ME_VOL0,     #2,     #0                      
-    .byte #ME_PITCH0,   #19,    #3                    
-    .byte #ME_VOL0,     #0,     #9                  
+    .byte #ME_VOL0,     #2,     #0
+    .byte #ME_PITCH0,   #19,    #3
+    .byte #ME_VOL0,     #0,     #9
 
-    .byte #ME_VOL0,     #14,    #0                      
-    .byte #ME_PITCH0,   #15,    #4                    
-    .byte #ME_VOL0,     #0,     #1                      
+    .byte #ME_VOL0,     #14,    #0
+    .byte #ME_PITCH0,   #15,    #4
+    .byte #ME_VOL0,     #0,     #1
 
-    .byte #ME_VOL0,     #2,     #0                      
-    .byte #ME_PITCH0,   #15,    #4                   
-    .byte #ME_VOL0,     #0,     #9                 
+    .byte #ME_VOL0,     #2,     #0
+    .byte #ME_PITCH0,   #15,    #4
+    .byte #ME_VOL0,     #0,     #9
 
 
-    .byte #ME_VOL0,     #14,    #0                    
-    .byte #ME_PITCH0,   #12,    #4                  
-    .byte #ME_VOL0,     #0,     #1                     
+    .byte #ME_VOL0,     #14,    #0
+    .byte #ME_PITCH0,   #12,    #4
+    .byte #ME_VOL0,     #0,     #1
 
-    .byte #ME_VOL0,     #2,     #0                   
-    .byte #ME_PITCH0,   #12,    #4                  
-    .byte #ME_VOL0,     #0,     #9                 
+    .byte #ME_VOL0,     #2,     #0
+    .byte #ME_PITCH0,   #12,    #4
+    .byte #ME_VOL0,     #0,     #9
 
     ; hit the hi hat along with the second note
     .byte #ME_VOL0,     #14,    #0
     .byte #ME_PITCH0,   #19,    #0
     .byte #ME_VOL1,     #8,     #1
     .byte #ME_VOL1,     #0,     #2
-    .byte #ME_VOL0,     #0,     #1                       
+    .byte #ME_VOL0,     #0,     #1
 
-    .byte #ME_VOL0,     #2,     #0                      
-    .byte #ME_PITCH0,   #19,    #4                    
-    .byte #ME_VOL0,     #0,     #9                  
+    .byte #ME_VOL0,     #2,     #0
+    .byte #ME_PITCH0,   #19,    #4
+    .byte #ME_VOL0,     #0,     #9
 
-    .byte #ME_VOL0,     #14,    #0                      
-    .byte #ME_PITCH0,   #14,    #4                  
-    .byte #ME_VOL0,     #0,     #1                      
+    .byte #ME_VOL0,     #14,    #0
+    .byte #ME_PITCH0,   #14,    #4
+    .byte #ME_VOL0,     #0,     #1
 
-    .byte #ME_VOL0,     #2,     #0                     
-    .byte #ME_PITCH0,   #14,    #4                   
-    .byte #ME_VOL0,     #0,     #9                  
+    .byte #ME_VOL0,     #2,     #0
+    .byte #ME_PITCH0,   #14,    #4
+    .byte #ME_VOL0,     #0,     #9
 
-    .byte #ME_VOL0,     #14,    #0                    
-    .byte #ME_PITCH0,   #11,    #4                 
-    .byte #ME_VOL0,     #0,     #1                      
+    .byte #ME_VOL0,     #14,    #0
+    .byte #ME_PITCH0,   #11,    #4
+    .byte #ME_VOL0,     #0,     #1
 
-    .byte #ME_VOL0,     #2,     #0                   
-    .byte #ME_PITCH0,   #11,    #4                  
-    .byte #ME_VOL0,     #0,     #9                
+    .byte #ME_VOL0,     #2,     #0
+    .byte #ME_PITCH0,   #11,    #4
+    .byte #ME_VOL0,     #0,     #9
 
     .byte #ME_DECLOOP,  #0,     #0                        ; decriment loop counter
     .byte #ME_EVALLOOP, #<firstSong1,   #>firstSong1    ; evaluate loop counter
@@ -390,25 +390,25 @@ splinter2
     .byte #ME_TONE1,    #8,     #0
     .byte #ME_PITCH1,   #0,     #0
 
-splinter2_loop 
+splinter2_loop
 
     .byte #ME_PITCH0,   #30,    #0  ; B1
     .byte #ME_VOL0,     #14,    #12
     .byte #ME_VOL0,     #2,     #12
     .byte #ME_VOL0,     #0,     #8
 
-    .byte #ME_VOL1,     #14,    #1  ; B2
-    .byte #ME_VOL1,     #0,     #15
+    .byte #ME_VOL1,     #14,    #7  ; B2
+    .byte #ME_VOL1,     #0,     #8
     .byte #ME_PITCH0,   #25,    #0
     .byte #ME_VOL0,     #14,    #12
-    .byte #ME_VOL0,     #2,     #4  
+    .byte #ME_VOL0,     #2,     #4
 
     .byte #ME_PITCH0,   #25,    #0  ; B3
     .byte #ME_VOL0,     #14,    #12
     .byte #ME_VOL0,     #2,     #4
     .byte #ME_PITCH0,   #25,    #0
     .byte #ME_VOL0,     #14,    #12
-    .byte #ME_VOL0,     #2,     #4  
+    .byte #ME_VOL0,     #2,     #4
 
     .byte #ME_PITCH0,   #25,    #0  ; B4
     .byte #ME_VOL1,     #14,    #0
@@ -418,7 +418,7 @@ splinter2_loop
     .byte #ME_PITCH0,   #22,    #0
     .byte #ME_VOL0,     #8,     #4
     .byte #ME_VOL0,     #12,    #8
-    .byte #ME_VOL0,     #2,     #4 
+    .byte #ME_VOL0,     #2,     #4
 
     .byte #ME_PITCH0,   #22,    #0  ; B1
     .byte #ME_VOL0,     #14,    #12
@@ -453,7 +453,7 @@ splinter
     .byte #ME_TONE1,    #8,     #0
     .byte #ME_PITCH1,   #0,     #0
 
-splinter_loop 
+splinter_loop
 
     .byte #ME_PITCH0,   #30,    #0  ; B1
     .byte #ME_VOL0,     #14,    #11
@@ -464,24 +464,24 @@ splinter_loop
     .byte #ME_VOL1,     #0,     #11
     .byte #ME_PITCH0,   #25,    #0
     .byte #ME_VOL0,     #14,    #9
-    .byte #ME_VOL0,     #2,     #3  
+    .byte #ME_VOL0,     #2,     #3
 
     .byte #ME_PITCH0,   #25,    #0  ; B3
     .byte #ME_VOL0,     #14,    #9
     .byte #ME_VOL0,     #2,     #3
     .byte #ME_PITCH0,   #25,    #0
     .byte #ME_VOL0,     #14,    #9
-    .byte #ME_VOL0,     #2,     #3 
+    .byte #ME_VOL0,     #2,     #3
 
     .byte #ME_PITCH0,   #25,    #0  ; B4
     .byte #ME_VOL1,     #14,    #0
     .byte #ME_VOL0,     #14,    #1
     .byte #ME_VOL1,     #0,     #8
     .byte #ME_VOL0,     #2,     #4  ; i am intentionally being a bit
-    .byte #ME_PITCH0,   #22,    #0  ; slippery with the time here. the 
+    .byte #ME_PITCH0,   #22,    #0  ; slippery with the time here. the
     .byte #ME_VOL0,     #12,     #3  ; two 22 notes are slightly delayed
     .byte #ME_VOL0,     #12,    #5
-    .byte #ME_VOL0,     #2,     #5 
+    .byte #ME_VOL0,     #2,     #5
 
     .byte #ME_PITCH0,   #22,    #0  ; B1
     .byte #ME_VOL0,     #14,    #8
@@ -515,12 +515,12 @@ splinter_loop
 
 ;
 ; The 2600 looks at this memory location to find the program entry point
-; 
+;
 
     ORG $FFFA
     .word sysinit          ; NMI
     .word sysinit          ; RESET
-    .word sysinit          ; IRQ 
+    .word sysinit          ; IRQ
 
 END
 
