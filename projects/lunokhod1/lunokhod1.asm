@@ -19,19 +19,18 @@
     SEG
     ORG $F000 ; set the ROM page
 
-; constantsf
+; constants
 
-MODE_ATTRACT            equ #0      ; game modes
-MODE_TRANSITION         equ #1      ; 1-127
-MODE_COLLISION          equ #247
-MODE_CRASH              equ #248
-MODE_TRANSITION_TOP     equ #249    ;
-MODE_IN_PROGRESS        equ #250    ;
-MODE_END_WAVE           equ #251    ; 129-253
-MODE_END_WAVE_TOP       equ #252    ;
-MODE_GAME_OVER          equ #253    ;
-MODE_RESET_DOWN         equ #254
-MODE_RESET              equ #255    ;
+MODE_ATTRACT            equ #0
+MODE_RESET              equ #1
+MODE_RESET_DOWN         equ #2
+MODE_GAME_OVER          equ #4
+MODE_GAME_ENDED         equ #5
+MODE_START              equ #6
+MODE_CRASH              equ #129
+MODE_IN_PROGRESS        equ #130
+MODE_END_WAVE           equ #130
+MODE_TRANSITION         equ #132
 
 DEBRIS_HIDDEN           equ #160
 MISSILE_FOLLOWS_SHIP    equ #0      ;
@@ -410,25 +409,37 @@ process_gameMode:
 
     lda gameMode                    ; load gameMode, choose appropriate
     cmp #MODE_IN_PROGRESS           ;
-    beq process_gameMode_end        ;
+    bne process_gameMode_2          ;
+    jmp process_gameMode_end
+process_gameMode_2
+    cmp #MODE_START
+    beq do_mode_start
     cmp #MODE_END_WAVE              ;
     beq do_end_wave                 ;
     cmp #MODE_RESET                 ; action
     beq do_reset                    ;
     cmp #MODE_GAME_OVER             ;
     beq do_game_over                ;
+    cmp #MODE_GAME_ENDED            ;
+    beq do_game_ended               ;
     cmp #MODE_TRANSITION            ;
-    beq do_start_wave               ;
-    cmp #MODE_COLLISION             ;
-    beq do_collision                ;
+    beq do_transition               ;
     cmp #MODE_CRASH                 ;
     beq do_crash                    ;
     jmp process_gameMode_end        ;
 
+do_mode_start
+
+    dec waveCounter
+    bne process_gameMode_end
+    lda #MODE_TRANSITION
+    sta gameMode
+    jmp process_gameMode_end
+
 do_reset
 
     jsr non_system_init
-    lda #MODE_TRANSITION
+    lda #MODE_START
     sta gameMode
     lda #1
     sta musicEngineCount
@@ -436,13 +447,14 @@ do_reset
     sta score
     sta score+1
     sta songPos
-    lda #128
+    lda #32
     sta waveCounter
     jmp process_gameMode_end
 
 do_game_over
 
-    jsr non_system_init
+    dec waveCounter
+    bne process_gameMode_end
     lda #MODE_ATTRACT
     sta gameMode
     lda #32
@@ -451,13 +463,22 @@ do_game_over
     sta musicEngineCount
     jmp process_gameMode_end
 
+do_game_ended
+
+    jsr non_system_init
+    lda #MODE_GAME_OVER
+    sta gameMode
+    lda #127
+    sta waveCounter
+    jmp process_gameMode_end
+
 do_end_wave
 
    lda #MODE_TRANSITION
    sta gameMode
    jmp process_gameMode_end
 
-do_start_wave
+do_transition
 
    dec waveCounter
    bne process_gameMode_end
@@ -465,23 +486,13 @@ do_start_wave
    sta gameMode
    jmp process_gameMode_end
 
-do_collision
-
-   lda #MODE_CRASH
-   sta gameMode
-   lda #16
-   sta waveCounter
-   jmp process_gameMode_end
-
 do_crash
 
    dec waveCounter
-   bne crashNotOverYet
+   bne process_gameMode_end
    lda #MODE_IN_PROGRESS
    sta gameMode
-crashNotOverYet
    jmp process_gameMode_end
-
 
 process_gameMode_end
 
@@ -705,7 +716,7 @@ remove_stale_debris
 
     cmp #$FF                        ; if radLevel has reached maximum
     bne remove_stale_debris_end     ; then the game is over, set
-    lda #MODE_GAME_OVER             ; gameMode to MODE_GAME_OVER and the
+    lda #MODE_GAME_ENDED            ; gameMode to MODE_GAME_OVER and the
     sta gameMode                    ; debrisCount to 0
     lda #0                          ;
     sta debrisCount                 ;
@@ -1878,7 +1889,9 @@ no_m1_collision
     adc #128                        ;
     sta radlevel                    ;
 
-    lda #MODE_COLLISION
+    lda #16
+    sta waveCounter
+    lda #MODE_CRASH
     sta gameMode
 
 do_collisions_end
@@ -1935,9 +1948,18 @@ do_joystick
 
     lda gameMode
     cmp #0
-    beq do_joystick_end
-    cmp #252
-    bcs do_joystick_end
+    bne no_attract_mode
+
+    lda INPT4           ; first check the trigger
+    bmi do_joystick_end
+    lda #MODE_RESET
+    sta gameMode
+    jmp do_joystick_end
+
+
+no_attract_mode
+    cmp #127
+    bcc do_joystick_end
 
     lda INPT4           ; first check the trigger
     bmi no_button
@@ -2395,6 +2417,17 @@ overscan_end_end
 
 ;
 ; The trigger was pressed, create a missile if we can
+;
+; if (shotcount > 0) skip
+; x = 8l
+; while (x != 0) {
+;    x = x - 2;
+;    if (missileVirtualXPostion[x] == 256) {
+;        shotcount = SHOT_TIMING
+;        missileVirtualXPostion[x] = shipVirtualXPostion;
+;        break;
+;    }
+; }
 ;
 
     echo "------", [*], [* - $F000]d, "routine: create_missile"
