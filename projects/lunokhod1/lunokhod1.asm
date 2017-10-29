@@ -29,7 +29,7 @@ MODE_GAME_ENDED         equ #5
 MODE_START              equ #6
 MODE_CRASH              equ #129
 MODE_IN_PROGRESS        equ #130
-MODE_END_WAVE           equ #130
+MODE_END_WAVE           equ #131
 MODE_TRANSITION         equ #132
 
 DEBRIS_HIDDEN           equ #160
@@ -909,7 +909,7 @@ load_wave:
     cmp #MODE_TRANSITION
     bne load_score
 
-    lda wave           ; load half the player score
+    lda wave            ; load half the player score
     and #$0F            ; and out the low nibble
     tax
     lda scoreTable,x    ;
@@ -2152,7 +2152,12 @@ skipHitRatioBonus
 
     lda #MODE_END_WAVE              ; if there is then we set gameMode to
     sta gameMode                        ; MODE_END_WAVE and set the waveCounter
-    inc wave
+    sed
+    clc
+    lda wave                        ; using adc instead of inc for
+    adc #1                          ; decimal mode
+    sta wave
+    cld
     lda #0                          ; back to 0
     sta waveCounter                 ;
     sta hitRatio
