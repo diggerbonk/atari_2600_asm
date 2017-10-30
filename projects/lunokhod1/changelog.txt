@@ -1,3 +1,9 @@
+BUILD-8 October 29, 2017
+
+    1) Start game with joystick button
+    2) Added title screen
+    3) Obvious wave transitions
+
 BUILD-7 July 10, 2017
 
     1) Removed smart bomb feature
