@@ -52,7 +52,7 @@ public class GeneratePlayfield {
         ArrayList<PlayfieldData> pfdata = new ArrayList<PlayfieldData>();
 
         try {
-        
+
             // read each line into an array.
             BufferedReader br = new BufferedReader(
                 new FileReader(args[0]));
@@ -92,6 +92,6 @@ public class GeneratePlayfield {
     }
 }
 
-        
-        
-     
+
+
+
