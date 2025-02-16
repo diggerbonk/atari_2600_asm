@@ -42,8 +42,7 @@ MAXXPOS                 equ #76+30  ; maximum screen position of the sled  (112)
 POSDELTA                equ #MAXXPOS-MINXPOS        ; this must be equal to maxpos-minpos (80)
 P0CENTER                equ #4      ; offset to center of player 0
 MISSILESPEED            equ #6
-;MISSILESIZE             equ #10
-MISSILESIZE             equ #6
+MISSILESIZE             equ #12
 SHOT_TIMING             equ #6
 MISSILECOLOR            equ #$0e
 ;MINXSCREEN              equ #8
@@ -53,23 +52,18 @@ MAXXSCREEN              equ #160
 GAUGECOLOR              equ #$32
 SCORECOLOR              equ #$0e
 SCOREBGCOLOR            equ #$00
-SKYCOLOR                equ #$94
-;SKYCOLOR                equ #$9a
-;MTNCOLOR                equ #$04
-;MTNCAPSCOLOR            equ #$04
-MTNCOLOR                equ #$0e
-MTNCAPSCOLOR            equ #$0e
+SKYCOLOR                equ #$00
+MTNCOLOR                equ #$04
+MTNCAPSCOLOR            equ #$04
 GRADIENT1               equ #$04
 GRADIENT2               equ #$04
 GRADIENT3               equ #$02
-RADARBGCOLOR            equ #$00
 RADARCOLOR              equ #$14
 RADARCOLOR2             equ #$C8
 GROUNDCOLOR             equ #$00
-;SNOWCOLOR               equ #$06
-SNOWCOLOR               equ #$0e
+SNOWCOLOR               equ #$06
 RAILCOLOR               equ #$02
-PLATFORMCOLOR           equ #$08
+PLATFORMCOLOR           equ #$04
 PLAYFIELDSZ             equ #140
 ENEMYHEIGHT             equ #17
 SPRITEINIT              equ #PLAYFIELDSZ+ENEMYHEIGHT+1
@@ -82,7 +76,7 @@ SONGTONE                equ #6
 ; variable assignments.
 
 score           equ  $80    ; 80-81
-unused          equ  $82    ; screen x position of player 0 [20,132]
+p0x             equ  $82    ; screen x position of player 0 [20,132]
 p0s             equ  $83    ; x speed of player 0 [-4,4]
 p0vxlo          equ  $84    ; player 0 virtual x position low byte
 temp1lo         equ  $85    ; temporary 16 bit var
@@ -190,11 +184,13 @@ clear_loop                          ;
     sta m2ys                        ;
     sta m3ys                        ;
 
-    lda #<boltFrame1             ; initialize the player sprite
+    lda #<sprite1Frame1             ; initialize the player sprite
     sta p1dataptrlo                 ;
-    lda #>boltFrame1             ;
+    lda #>sprite1Frame1             ;
     sta p1dataptrhi                 ;
 
+    lda #$4d                        ; initialize initial player screen
+    sta p0x                         ; and virtual positions
     lda #77                         ;
     sta p0vxlo                      ;
 
@@ -589,6 +585,11 @@ move_missiles_even
     jsr convert_virtual_xpos
     clc
     adc #P0CENTER       ; add to align with center of ship
+#if MISSILE_FOLLOWS_SHIP = 1
+    lda p0x             ; missle follows ship
+    clc                 ; ""
+    adc #4              ; ""
+#endif
     ldx #3
     jsr do_sprite_move
 move_missiles_even_1
@@ -600,6 +601,11 @@ move_missiles_even_1
     jsr convert_virtual_xpos
     clc
     adc #P0CENTER       ; add to align with center of ship
+#if MISSILE_FOLLOWS_SHIP = 1
+    lda p0x             ; missle follows ship
+    clc                 ; ""
+    adc #4              ; ""
+#endif
     ldx #2
     sta HMCLR
     jsr do_sprite_move
@@ -615,6 +621,11 @@ move_missiles_odd
     jsr convert_virtual_xpos
     clc
     adc #P0CENTER       ; add to align with center of ship
+#if MISSILE_FOLLOWS_SHIP = 1
+    lda p0x             ; missle follows ship
+    clc                 ; ""
+    adc #4              ; ""
+#endif
     ldx #3
     jsr do_sprite_move
 move_missiles_odd_3
@@ -626,6 +637,11 @@ move_missiles_odd_3
     jsr convert_virtual_xpos
     clc
     adc #P0CENTER       ; add to align with center of ship
+#if MISSILE_FOLLOWS_SHIP = 1
+    lda p0x             ; missle follows ship
+    clc                 ; ""
+    adc #4              ; ""
+#endif
     ldx #2
     sta HMCLR
     jsr do_sprite_move
@@ -1103,8 +1119,7 @@ score_loop              ; +1, 5
 
 init_player_position
 
-    lda p0vxlo
-    jsr convert_virtual_xpos
+    lda p0x             ; 2, 22
     ldx #0              ; 2, 24
     jsr do_sprite_move  ; -,
 
@@ -1240,10 +1255,10 @@ draw_playfield
 draw_title_screen
 
     lda #0
+    sta ENABL
     ldx #16
 drawingTheTitlescreen1
     sta WSYNC
-    sta HMOVE
     dex                     ; 2, 2
     bne drawingTheTitlescreen1 ; 2, 4
 
@@ -1261,7 +1276,6 @@ draw_title_screen_loop           ; +1, 65
 draw_title_inner_loop       ; +1, 58
 
     sta WSYNC               ; 3, 24,64,73
-    sta HMOVE
     sta COLUPF
     lda TScreenLeft1-1,X    ; 4, 4
     sta PF0                 ; 3, 7
@@ -1294,6 +1308,7 @@ draw_title_inner_loop       ; +1, 58
     bne draw_title_screen_loop   ; 2, 64
 
     sta WSYNC                       ; clear the playfield registers
+    sta ENABL
     lda #0
     sta COLUPF
     sta PF0
@@ -1418,11 +1433,6 @@ draw_playfield_end          ;+1, 7 19 23 ;
     echo "------", [*], [* - $F000]d, "draw_hills"
 
 draw_hills
-
-
-    lda #%00110000      ; 2, 13
-    sta CTRLPF          ; 3, 16
-
     sta HMCLR           ; 3, 26 ; so HMOVE's will not reposition debris
 
     lda scrollpos       ; 3, 29     ; calculate the PFData offset and
@@ -1434,45 +1444,43 @@ draw_hills
     lda #SNOWCOLOR      ; 2, 39     ; change playfield color
     sta COLUPF          ; 3, 42     ;
 
-
     lda #$FF            ; 2, 44     ; initialize the debris counter at
     sta temp1lo         ; 3, 47     ; FF, this allows us to continue
                                     ; using skipdraw with 'nexty' from
                                     ; draw_playfield
 
-hills_loop              ; +1,(43 47
+hills_loop              ; +1, 42 47
 
-    sec                 ; 2, (45, 49) ;
-    sbc nexty           ; 3, (48, 52) ;
-    adc #ENEMYHEIGHT    ; 2, (50, 54) ;
-    bcs doDrawSprite    ; 2, (52, 56) ;
-
-    sta WSYNC           ; 3, (55, 59) ;
+    sec                 ; 2, 49 ;
+    sbc nexty           ; 3, 52 ;
+    adc #ENEMYHEIGHT    ; 2, 54 ;
+    bcs doDrawSprite    ; 2, 56 ;
+    sta WSYNC           ; 3, 59      ;
     sta HMOVE           ; 3, 3  ;
     lda PFData0-1,X     ; 4, 7
     sta PF0             ; 3, 10
     jmp overSprite      ; 3, 13
-doDrawSprite            ; 1, (13, 57) ; draw the sprite
-    tay                 ; 2, (15, 59)
-    lda (p1dataptrlo),y ; 6, (21, 65)
-    sta WSYNC           ; 3, (24, 68)
+doDrawSprite            ; 1, 57 ; draw the sprite
+    tay                 ; 2, 59
+    lda (p1dataptrlo),y ; 6, 16
+    sta WSYNC           ; 3, 62
     sta HMOVE           ; 3, 3
-    sta GRP1            ; 3, 6
-    lda (p1colorlo),y   ; 6, 12
-    sta COLUP1          ; 3, 15
-    lda PFData0-1,X     ; 4, 19
-    sta PF0             ; 3, 22
-overSprite              ;+1, (14
-    lda PFData1-1,X     ; 4, (18, 26)
-    sta PF1             ; 3, (21, 29)
-    lda PFData2-1,X     ; 4, (25, 33)
-    sta PF2             ; 3, (28, 36)
+    sta GRP1            ; 3, 19
+    lda (p1colorlo),y   ; 6, 16
+    sta COLUP1          ; 3, 19
+    lda PFData0-1,X     ; 4, 7
+    sta PF0             ; 3, 10
+overSprite              ;+1, 13
+    lda PFData1-1,X     ; 4, 17
+    sta PF1             ; 3, 20
+    lda PFData2-1,X     ; 4, 24
+    sta PF2             ; 3, 27
 ;    sleep 9
-    dex                 ; 2, (30, 38)
-    dec temp1lo         ; 5, (35, 43)
-    lda temp1lo         ; 3, (38, 46)
-    cmp #$FB            ; 2, (40, 48)
-    bne hills_loop      ; 2, (42, 50)
+    dex                 ; 2, 29
+    dec temp1lo         ; 5, 34
+    lda temp1lo         ; 3, 37
+    cmp #$FB            ; 2, 39
+    bne hills_loop      ; 2, 41
 
 draw_hills_end
 
@@ -1486,76 +1494,73 @@ draw_hills_end
 draw_sled_and_rail
 
 
-    lda #0               ; 2, 44, 52
-    sta ENAM0            ; 3, 47, 55  ; turn off missiles
-    sta ENAM1            ; 3, 50, 58  ;
+    lda #0              ; 2, 43
+    sta ENAM0           ; 3, 46  ; turn off missiles
+    sta ENAM1           ; 3, 49  ;
 
     sta WSYNC
-    sta HMOVE           ; 3, 3 ;
+;    sta HMOVE           ; 3, 3 ;
 
-    sta COLUPF           ; 3, 6  ; set pf color to black for HMOVE hiding
-    sta PF0              ; 3, 9  ; clear playfield data
-    sta PF1              ; 3, 12 ;
-    sta PF2              ; 3, 15 ;
+    sta COLUPF          ; 3, 6  ; set pf color to black for HMOVE hiding
+    sta PF0             ; 3, 9  ; clear playfield data
+    sta PF1             ; 3, 12 ;
+    sta PF2             ; 3, 15 ;
 
-    lda #SNOWCOLOR       ; 2, 17 ; change the background color to white
-    sta COLUBK           ; 3, 20 ; ""
+    lda #SNOWCOLOR      ; 2, 17 ; change the background color to white
+    sta COLUBK          ; 3, 20 ; ""
 
-    ldx #10              ; 2, 22
+    ldx #10
 
-    lda temp1lo          ; 3, 25
+    lda temp1lo         ;
 
-do_sled                  ; +1, 25, 29
+do_sled
 
-    sec                  ; 2, 27, 31
-    sbc nexty            ; 3, 30, 34
-    adc #ENEMYHEIGHT     ; 2, 32, 36
-    bcs doDrawSprite2    ; 2, 34, 38
-    sta WSYNC            ; 3, 37, 41
-    sta HMOVE           ; 3, 3
-    lda PlayerSprite,X   ; 4, 4
-    sta GRP0             ; 3, 7
-    lda PlayerColor,X    ; 4, 11
-    sta COLUP0           ; 3, 14
+    sec                 ; 2
+    sbc nexty           ; 3,  ;
+    adc #ENEMYHEIGHT    ; 2,  ;
+    bcs doDrawSprite2; 2,  ;
+    sta WSYNC
+    lda PlayerSprite,X
+    sta GRP0                   ; 45
+    lda PlayerColor,X
+    sta COLUP0
 
-    jmp overSprite2      ; 3, 17
-doDrawSprite2            ; +1, 35
-    tay                  ; 2, 37
-    lda (p1dataptrlo),y  ; 6, 43       ;
-    sta WSYNC            ; 3, 46
-    sta HMOVE           ; 3, 3
-    sta GRP1             ; 3, 3
-;    lda (p1colorlo),y   ; 6, 9
-;    sta COLUP1          ; 3, 12
+    jmp overSprite2
+doDrawSprite2
+    tay
+    lda (p1dataptrlo),y ; 6,        ;
+    sta WSYNC
+    sta GRP1
+;    lda (p1colorlo),y   ; 6, 16
+;    sta COLUP1          ; 3, 19    ; 3,
 
-    lda PlayerSprite,X   ; 4, 7
-    sta GRP0             ; 3, 10
-    lda PlayerColor,X    ; 4, 14
-    sta COLUP0    ;      ; 3, 17
+    lda PlayerSprite,X
+    sta GRP0                   ; 45
+    lda PlayerColor,X
+    sta COLUP0    ;
 
-overSprite2              ; -, 17
-    dec temp1lo          ; 2, 19
-    lda temp1lo          ; 3, 22
-    dex                  ; 2, 24
-    cpx #0               ; 2, 26
-    bne do_sled          ; 2, 28
+overSprite2
+    dec temp1lo
+    lda temp1lo
+    dex
+    cpx #0
+    bne do_sled
 ;; TEMP
-    stx GRP1             ; 3, 31
+    stx GRP1
 ;; END TEMP
 
 ;    lda #RAILCOLOR
 ;    sta COLUBK
-    lda PlayerSprite,X   ; 4, 35
-    sta WSYNC            ; 3, 38
-    sta HMOVE           ; 3, 3
-    sta GRP0             ; 3, 41
+    lda PlayerSprite,X
+    sta WSYNC
+    sta GRP0
 
-    lda #PLATFORMCOLOR   ; 2, 43
-    sta COLUBK           ; 3, 46
-    lda #0               ; 2, 48
-    sta GRP0             ; 3, 51
+    lda #PLATFORMCOLOR
+    sta COLUBK
+    lda #0
+    sta GRP0
 
-    ldy #172             ; 2, 53
+    ldy #172
 
 draw_sled_and_rail_end
 
@@ -1693,7 +1698,7 @@ setColor
     sta HMP1            ; 3, 55
 ;    sty nexty           ; 3, 58
     ldx #32             ; 2, 60
-    lda #RADARBGCOLOR
+    lda #0
     sta COLUPF          ; 3, 6
     sta WSYNC           ; 3, 0
     sta HMOVE           ; 3, 3
@@ -2029,25 +2034,22 @@ p0_position_end
     echo "------", [*], [* - $F000]d, "calc_offset"
 
 calc_offset
-
     lda vxoffsetlo
     sta temp1lo
-
-    lda p0vxlo
-    jsr convert_virtual_xpos
-
+    lda p0s
+    clc
+    adc p0x
     cmp #MINXPOS
     bcc adjustOffsetDown
     cmp #MAXXPOS+1
     bcs adjustOffsetUp
-    jmp calc_offset_end
+    jmp noAdjustOffset
 adjustOffsetDown
     sta temp3
     lda #MINXPOS
     sec
     sbc temp3
     sta temp3
-
     lda vxoffsetlo
     sec
     sbc temp3
@@ -2057,7 +2059,6 @@ adjustOffsetDown
     sec
     sbc temp3
     sta scrollpos
-
     cmp #200
     bcs wrapUp
     jmp scrollDone
@@ -2065,16 +2066,14 @@ wrapUp
     clc
     adc #80
     sta scrollpos
-
 scrollDone
 
 
-    jmp calc_offset_end
+    jmp noAdjustOffset
 adjustOffsetUp
     sec
     sbc #MAXXPOS
     sta temp3
-
     lda vxoffsetlo
     clc
     adc temp3
@@ -2084,7 +2083,6 @@ adjustOffsetUp
     clc
     adc temp3
     sta scrollpos
-
     cmp #80
     bcs wrapDown
     jmp scrollDone2
@@ -2093,6 +2091,13 @@ wrapDown
     sbc #80
     sta scrollpos
 scrollDone2
+
+
+noAdjustOffset
+
+    lda p0vxlo
+    jsr convert_virtual_xpos
+    sta p0x
 
 calc_offset_end
 
@@ -2807,54 +2812,26 @@ spriteTable
     .byte #>sprite7FrameTable
     .byte #<sprite5FrameTable  ; 010 Small Right
     .byte #>sprite5FrameTable
-    .byte #<boltFrameTable  ; 011 Radioactive
-    .byte #>boltFrameTable
+    .byte #<sprite1FrameTable  ; 011 Radioactive
+    .byte #>sprite1FrameTable
     .byte #<sprite6FrameTable  ; 100 Left
     .byte #>sprite6FrameTable
     .byte #<sprite2FrameTable  ; 101 Down
     .byte #>sprite2FrameTable
     .byte #<sprite4FrameTable  ; 110 Small Left
     .byte #>sprite4FrameTable
-    .byte #<boltFrameTable  ; 111 Radioactive
-    .byte #>boltFrameTable
+    .byte #<sprite1FrameTable  ; 111 Radioactive
+    .byte #>sprite1FrameTable
 
-colorTable
-    .byte #<sprite3FrameTable  ; 000 Absorber
-    .byte #>sprite3FrameTable
-    .byte #<sprite7FrameTable  ; 001 Right
-    .byte #>sprite7FrameTable
-    .byte #<sprite5FrameTable  ; 010 Small Right
-    .byte #>sprite5FrameTable
-    .byte #<boltColorTable  ; 011 Radioactive
-    .byte #>boltColorTable
-    .byte #<sprite6FrameTable  ; 100 Left
-    .byte #>sprite6FrameTable
-    .byte #<sprite2FrameTable  ; 101 Down
-    .byte #>sprite2FrameTable
-    .byte #<sprite4FrameTable  ; 110 Small Left
-    .byte #>sprite4FrameTable
-    .byte #<boltFrameTable  ; 111 Radioactive
-    .byte #>boltFrameTable
-
-boltFrameTable
-    .byte #<boltFrame1
-    .byte #>boltFrame1
-    .byte #<boltFrame3
-    .byte #>boltFrame3
-    .byte #<boltFrame5
-    .byte #>boltFrame5
-    .byte #<boltFrame7
-    .byte #>boltFrame7
-
-boltColorTable
-    .byte #<boltColors1
-    .byte #>boltColors1
-    .byte #<boltColors3
-    .byte #>boltColors3
-    .byte #<boltColors5
-    .byte #>boltColors5
-    .byte #<boltColors7
-    .byte #>boltColors7
+sprite1FrameTable
+    .byte #<sprite1Frame1
+    .byte #>sprite1Frame1
+    .byte #<sprite1Frame3
+    .byte #>sprite1Frame3
+    .byte #<sprite1Frame5
+    .byte #>sprite1Frame5
+    .byte #<sprite1Frame7
+    .byte #>sprite1Frame7
 
 sprite2FrameTable
     .byte #<sprite2Frame1
@@ -2927,7 +2904,7 @@ explosionFrameTable
     .byte #<explosionSprite2
     .byte #>explosionSprite2
 
-boltFrame1
+sprite1Frame1
         .byte #%00000000
         .byte #%00000000
         .byte #%00000001
@@ -2947,7 +2924,7 @@ boltFrame1
         .byte #%00000000
     .byte #<boltColors1
     .byte #>boltColors1
-boltFrame3
+sprite1Frame3
         .byte #%00000000
         .byte #%00000000
         .byte #%00000001
@@ -2967,7 +2944,7 @@ boltFrame3
         .byte #%00000000
     .byte #<boltColors3
     .byte #>boltColors3
-boltFrame5
+sprite1Frame5
         .byte #%00000000
         .byte #%00000000
         .byte #%00000001
@@ -2987,7 +2964,7 @@ boltFrame5
         .byte #%00000000
     .byte #<boltColors5
     .byte #>boltColors5
-boltFrame7
+sprite1Frame7
         .byte #%00000000
         .byte #%00000000
         .byte #%00000001
@@ -3089,8 +3066,8 @@ sprite4Frame1
     .byte #%00000000
     .byte #%00000000
     .byte #%00000000
-    .byte #<DebrisColor1
-    .byte #>DebrisColor1
+    .byte #<DebrisColor2
+    .byte #>DebrisColor2
 
 sprite4Frame2
     .byte #%00000000
@@ -3110,8 +3087,8 @@ sprite4Frame2
     .byte #%00000000
     .byte #%00000000
     .byte #%00000000
-    .byte #<DebrisColor1
-    .byte #>DebrisColor1
+    .byte #<DebrisColor2
+    .byte #>DebrisColor2
 
 sprite4Frame3
     .byte #%00000000
@@ -3131,8 +3108,8 @@ sprite4Frame3
     .byte #%00000000
     .byte #%00000000
     .byte #%00000000
-    .byte #<DebrisColor1
-    .byte #>DebrisColor1
+    .byte #<DebrisColor2
+    .byte #>DebrisColor2
 
 
 sprite5Frame1
@@ -3153,8 +3130,8 @@ sprite5Frame1
     .byte #%00000000
     .byte #%00000000
     .byte #%00000000
-    .byte #<DebrisColor1
-    .byte #>DebrisColor1
+    .byte #<DebrisColor2
+    .byte #>DebrisColor2
 
 sprite5Frame2
     .byte #%00000000
@@ -3174,8 +3151,8 @@ sprite5Frame2
     .byte #%00000000
     .byte #%00000000
     .byte #%00000000
-    .byte #<DebrisColor1
-    .byte #>DebrisColor1
+    .byte #<DebrisColor2
+    .byte #>DebrisColor2
 
 sprite5Frame3
     .byte #%00000000
@@ -3195,8 +3172,8 @@ sprite5Frame3
     .byte #%00000000
     .byte #%00000000
     .byte #%00000000
-    .byte #<DebrisColor1
-    .byte #>DebrisColor1
+    .byte #<DebrisColor2
+    .byte #>DebrisColor2
 
 sprite6Frame1
     .byte #%00000000
@@ -3306,22 +3283,41 @@ absorberColor1
 
 DebrisColor1
     .byte #$0e
-    .byte #$00
-    .byte #$00
-    .byte #$00
+    .byte #$02
+    .byte #$02
     .byte #$02
     .byte #$04
     .byte #$06
     .byte #$08
     .byte #$0a
-    .byte #$08
+    .byte #$0e
+    .byte #$0c
+    .byte #$0a
     .byte #$08
     .byte #$06
     .byte #$04
     .byte #$02
-    .byte #$00
-    .byte #$00
-    .byte #$00
+    .byte #$02
+    .byte #$02
+
+DebrisColor2
+    .byte #$0e
+    .byte #$02
+    .byte #$02
+    .byte #$02
+    .byte #$04
+    .byte #$06
+    .byte #$08
+    .byte #$08
+    .byte #$0a
+    .byte #$3a
+    .byte #$3e
+    .byte #$3c
+    .byte #$3a
+    .byte #$38
+    .byte #$36
+    .byte #$34
+    .byte #$32
 
 boltColors7
     .byte #$0e
