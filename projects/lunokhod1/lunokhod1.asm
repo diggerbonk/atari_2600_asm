@@ -42,7 +42,7 @@ MAXXPOS                 equ #76+30  ; maximum screen position of the sled  (112)
 POSDELTA                equ #MAXXPOS-MINXPOS        ; this must be equal to maxpos-minpos (80)
 P0CENTER                equ #4      ; offset to center of player 0
 MISSILESPEED            equ #6
-MISSILESIZE             equ #12
+MISSILESIZE             equ #10
 SHOT_TIMING             equ #6
 MISSILECOLOR            equ #$0e
 ;MINXSCREEN              equ #8
