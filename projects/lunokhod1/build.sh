@@ -16,8 +16,10 @@ else
         -f3 -olunokhod1.bin -slunokhod1.sym
 
     if [[ "$1" == "build" ]] ; then
-        cp lunokhod1.bin lunokhod1-$2.bin
-        cp lunokhod1.asm lunokhod1-$2.asm
-        zip lunokhod1-$2.zip lunokhod1-$2.bin lunokhod1-$2.asm pfdata.asm todo.txt changelog.txt
+        mkdir -p releases
+        mv lunokhod1.bin releases/lunokhod1-$2.bin
+        cp lunokhod1.asm releases/lunokhod1-$2.asm
+        zip lunokhod1-$2.zip releases/lunokhod1-$2.bin releases/lunokhod1-$2.asm pfdata.asm todo.txt changelog.txt
+        mv lunokhod1-$2.zip releases/lunokhod1-$2.zip
     fi
 fi
